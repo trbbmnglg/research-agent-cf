@@ -5,6 +5,11 @@
   "compatibility_date": "2026-05-01",
   // LangGraph.js / LangChain.js need Node built-ins (async_hooks, buffer, …)
   "compatibility_flags": ["nodejs_compat"],
+  // Custom domain — Cloudflare auto-creates the DNS record + TLS cert on deploy
+  // (requires robertbumanglagjr.com to be a zone on this Cloudflare account).
+  "routes": [
+    { "pattern": "research-agent.robertbumanglagjr.com", "custom_domain": true }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
