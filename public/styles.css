@@ -70,6 +70,12 @@ input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; backgro
 input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:var(--cy); box-shadow:0 0 10px rgba(0,240,255,.9), 0 0 22px rgba(0,240,255,.4); }
 input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; border-radius:50%; background:var(--cy); box-shadow:0 0 10px rgba(0,240,255,.9); }
 
+.selects{ display:flex; flex-wrap:wrap; gap:24px; margin-bottom:14px; }
+.selects label{ display:flex; flex-direction:column; gap:6px; font-family:'Share Tech Mono',monospace; font-size:.82rem; color:#9fe9ff; flex:1 1 220px; }
+.selects select{ background:rgba(7,16,28,.7); color:var(--ink); border:1px solid rgba(0,240,255,.4); padding:9px 10px; font-family:'Share Tech Mono',monospace; }
+.selects select:focus{ outline:none; border-color:var(--cy); box-shadow:0 0 12px rgba(0,240,255,.5); }
+.selects option{ background:#06101c; color:var(--ink); }
+
 .presets-label{ font-family:'Share Tech Mono',monospace; color:#9fe9ff; font-size:.8rem; margin:6px 0; }
 .presets{ display:flex; flex-wrap:wrap; gap:10px; }
 

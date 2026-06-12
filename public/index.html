@@ -39,6 +39,18 @@
         </label>
       </div>
 
+      <div class="selects">
+        <label>engine
+          <select id="provider">
+            <option value="anthropic">Claude (Anthropic)</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <label>model
+          <select id="model"></select>
+        </label>
+      </div>
+
       <div class="presets-label">Quick topics — click to run:</div>
       <div class="presets">
         <button class="btn preset" data-topic="Agentic AI"
@@ -98,7 +110,7 @@
           <div class="cyber-tech tech-python"><span class="tic"></span><span class="tx"><b>TypeScript</b><small>Worker runtime</small></span></div>
           <div class="cyber-tech tech-langgraph"><span class="tic"></span><span class="tx"><b>LangGraph.js</b><small>agent graph + reflect loop</small></span></div>
           <div class="cyber-tech tech-langchain"><span class="tic"></span><span class="tx"><b>LangChain.js</b><small>LLM orchestration layer</small></span></div>
-          <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>OpenAI</b><small>gpt-4o-mini reasoning</small></span></div>
+          <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>OpenAI · Claude</b><small>selectable LLM engine</small></span></div>
           <div class="cyber-tech tech-tavily"><span class="tic"></span><span class="tx"><b>Tavily</b><small>recency-aware news search</small></span></div>
           <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + static assets</small></span></div>
         </div>
@@ -108,7 +120,7 @@
       </div>
     </details>
 
-    <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + OpenAI + Tavily on Cloudflare ◢◤</footer>
+    <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + OpenAI/Claude + Tavily on Cloudflare ◢◤</footer>
   </main>
 
   <button id="musicBtn" class="music-btn" type="button">&#9835; MUSIC: OFF</button>

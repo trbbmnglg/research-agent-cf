@@ -1,5 +1,5 @@
-# Copy to ".dev.vars" for local `wrangler dev`. For production use:
-#   wrangler secret put OPENAI_API_KEY
-#   wrangler secret put TAVILY_API_KEY
+# Copy to ".dev.vars" for local `wrangler dev`. For production use `wrangler secret put`.
+# You only need the LLM key for the provider you select in the UI (or set both).
 OPENAI_API_KEY="sk-your-openai-key"
+ANTHROPIC_API_KEY="sk-ant-your-anthropic-key"
 TAVILY_API_KEY="tvly-your-tavily-key"

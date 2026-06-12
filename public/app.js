@@ -198,6 +198,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 // =========================================================================== //
 const $ = (id) => document.getElementById(id);
 const daysEl = $("days"), passesEl = $("passes");
+const providerEl = $("provider"), modelEl = $("model");
 const briefingEl = $("briefing"), statusEl = $("status");
 const sourcesEl = $("sources"), sourcesBody = $("sourcesBody");
 const reasoningEl = $("reasoning"), reasoningBody = $("reasoningBody");
@@ -205,6 +206,22 @@ let busy = false;
 
 daysEl.addEventListener("input", () => ($("daysVal").textContent = daysEl.value));
 passesEl.addEventListener("input", () => ($("passVal").textContent = passesEl.value));
+
+// Provider/model pickers — populated from /api/models (single source of truth).
+let MODELS = {
+  anthropic: [{ id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" }],
+  openai: [{ id: "gpt-4o-mini", label: "GPT-4o mini" }],
+};
+function populateModels() {
+  const list = MODELS[providerEl.value] || [];
+  modelEl.innerHTML = list.map((m) => `<option value="${m.id}">${m.label}</option>`).join("");
+}
+providerEl.addEventListener("change", populateModels);
+fetch("/api/models")
+  .then((r) => r.json())
+  .then((data) => { if (data && data.anthropic) MODELS = data; populateModels(); })
+  .catch(() => populateModels());
+populateModels();
 
 document.querySelectorAll(".preset").forEach((b) =>
   b.addEventListener("click", () => runResearch(b.dataset.topic, b.dataset.question)),
@@ -239,6 +256,8 @@ async function runResearch(topic, question) {
         topic, question,
         days: Number(daysEl.value),
         maxIterations: Number(passesEl.value),
+        provider: providerEl.value,
+        model: modelEl.value,
       }),
     });
     const data = await res.json();

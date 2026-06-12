@@ -11,15 +11,43 @@
 // writes TARGETED queries. The loop is hard-capped by maxIterations.
 
 import { END, START, StateGraph, Annotation } from "@langchain/langgraph";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { PROFILE, type Profile } from "./profile";
 
 // --------------------------------------------------------------------------- //
-// Config
+// Providers & models — the UI picks one per request. Search/fetch is handled by
+// the agent via Tavily, so any capable chat model works as the reasoner.
 // --------------------------------------------------------------------------- //
-const FAST_MODEL = "gpt-4o-mini"; // plan / score / reflect (many cheap calls)
-const WRITER_MODEL = "gpt-4o-mini"; // synthesize (bump to "gpt-4o" for richer prose)
+export type Provider = "openai" | "anthropic";
+
+export const MODELS: Record<Provider, { id: string; label: string }[]> = {
+  openai: [
+    { id: "gpt-4o-mini", label: "GPT-4o mini" },
+    { id: "gpt-4o", label: "GPT-4o" },
+    { id: "gpt-4.1-mini", label: "GPT-4.1 mini" },
+    { id: "gpt-4.1", label: "GPT-4.1" },
+  ],
+  anthropic: [
+    { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+    { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+    { id: "claude-fable-5", label: "Claude Fable 5" },
+  ],
+};
+
+const DEFAULTS: Record<Provider, string> = {
+  openai: "gpt-4o-mini",
+  anthropic: "claude-haiku-4-5-20251001",
+};
+
+function resolveModel(provider: Provider, model?: string): string {
+  const allowed = MODELS[provider].map((m) => m.id);
+  return model && allowed.includes(model) ? model : DEFAULTS[provider];
+}
+
 const MAX_RESULTS_PER_QUERY = 5;
 const RELEVANCE_FLOOR = 4;
 
@@ -61,10 +89,13 @@ export interface ResearchParams {
   topic: string;
   days?: number;
   maxIterations?: number;
+  provider?: Provider;
+  model?: string;
 }
 
 export interface Env {
-  OPENAI_API_KEY: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   TAVILY_API_KEY: string;
 }
 
@@ -91,7 +122,7 @@ function normalizeTag(tag: unknown): Tag {
   return hit ?? "Announced";
 }
 
-async function ask(llm: ChatOpenAI, system: string, user: string): Promise<string> {
+async function ask(llm: BaseChatModel, system: string, user: string): Promise<string> {
   const res = await llm.invoke([new SystemMessage(system), new HumanMessage(user)]);
   return typeof res.content === "string" ? res.content : JSON.stringify(res.content);
 }
@@ -147,9 +178,16 @@ type State = typeof StateAnnotation.State;
 // Graph factory — built per request so nodes can close over the LLM clients
 // (Workers inject secrets via env, not process.env).
 // --------------------------------------------------------------------------- //
-function buildGraph(env: Env) {
-  const fastLlm = new ChatOpenAI({ apiKey: env.OPENAI_API_KEY, model: FAST_MODEL, temperature: 0, maxTokens: 1024 });
-  const writerLlm = new ChatOpenAI({ apiKey: env.OPENAI_API_KEY, model: WRITER_MODEL, temperature: 0, maxTokens: 3000 });
+function makeLlm(provider: Provider, model: string, env: Env, maxTokens: number): BaseChatModel {
+  if (provider === "anthropic") {
+    return new ChatAnthropic({ apiKey: env.ANTHROPIC_API_KEY, model, temperature: 0, maxTokens });
+  }
+  return new ChatOpenAI({ apiKey: env.OPENAI_API_KEY, model, temperature: 0, maxTokens });
+}
+
+function buildGraph(env: Env, provider: Provider, model: string) {
+  const fastLlm = makeLlm(provider, model, env, 1024);
+  const writerLlm = makeLlm(provider, model, env, 3000);
 
   // 1. plan — broad queries on the first pass; targeted gap-filling queries after.
   async function plan(state: State): Promise<Partial<State>> {
@@ -334,7 +372,9 @@ function buildGraph(env: Env) {
 // Public entry point
 // --------------------------------------------------------------------------- //
 export async function runResearch(env: Env, params: ResearchParams) {
-  const app = buildGraph(env);
+  const provider: Provider = params.provider === "openai" ? "openai" : "anthropic";
+  const model = resolveModel(provider, params.model);
+  const app = buildGraph(env, provider, model);
   const initial: State = {
     question: params.question,
     topic: params.topic,
@@ -350,5 +390,5 @@ export async function runResearch(env: Env, params: ResearchParams) {
     history: [],
   };
   const final = await app.invoke(initial, { recursionLimit: 50 });
-  return { answer: final.answer, docs: final.docs, history: final.history };
+  return { answer: final.answer, docs: final.docs, history: final.history, provider, model };
 }
