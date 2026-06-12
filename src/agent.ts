@@ -269,7 +269,14 @@ function buildGraph(env: Env) {
       `Request: ${state.question}\nTopic: ${state.topic}\n` +
       `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
       `Items (already ranked, highest first):\n${context}`;
-    return { answer: await ask(writerLlm, system, user) };
+    try {
+      return { answer: await ask(writerLlm, system, user) };
+    } catch (e) {
+      // fail safe: don't 500 the whole run if the writer call fails — show the
+      // raw matches (which the UI lists under Sources) plus the error.
+      const msg = e instanceof Error ? e.message : String(e);
+      return { answer: `> ⚠ Couldn't generate the briefing (model error): ${msg}\n\nThe matched sources are listed under **Sources & scores** below.` };
+    }
   }
 
   // 5. reflect — THE agentic node: critique the draft, decide whether to loop.
