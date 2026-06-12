@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "research-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  // LangGraph.js / LangChain.js need Node built-ins (async_hooks, buffer, …)
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // Only run the Worker for API calls; everything else is served as a static file.
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+  // Secrets (set with `wrangler secret put`, or .dev.vars locally):
+  //   OPENAI_API_KEY, TAVILY_API_KEY
+}

@@ -1,0 +1,23 @@
+{
+  "name": "research-agent-cf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-correcting AI news research agent — LangGraph.js on Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.48",
+    "@langchain/langgraph": "^1.4.1",
+    "@langchain/openai": "^1.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.100.0"
+  }
+}

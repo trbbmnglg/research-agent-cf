@@ -1,0 +1,5 @@
+# Copy to ".dev.vars" for local `wrangler dev`. For production use:
+#   wrangler secret put OPENAI_API_KEY
+#   wrangler secret put TAVILY_API_KEY
+OPENAI_API_KEY="sk-your-openai-key"
+TAVILY_API_KEY="tvly-your-tavily-key"

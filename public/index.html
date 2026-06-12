@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI News Agent</title>
+  <meta name="description" content="Self-correcting AI news research agent — LangGraph.js on Cloudflare Workers." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- background effects -->
+  <canvas id="matrix" aria-hidden="true"></canvas>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="cursor-ring" aria-hidden="true"></div>
+
+  <main class="container">
+    <header class="hero">
+      <div class="eyebrow">// PERSONALIZED INTELLIGENCE FEED</div>
+      <h1 class="title" data-text="AI NEWS AGENT">AI NEWS AGENT</h1>
+      <p class="sub">
+        Fetches recent AI news, scores every item against your profile, tags its
+        substance, strips the hype — then critiques its own draft and searches
+        again until coverage is solid.
+      </p>
+      <div class="rule"></div>
+    </header>
+
+    <section class="panel controls">
+      <div class="sliders">
+        <label>look back (days): <b id="daysVal">7</b>
+          <input type="range" id="days" min="1" max="30" value="7" />
+        </label>
+        <label>max research passes: <b id="passVal">3</b>
+          <input type="range" id="passes" min="1" max="5" value="3" />
+        </label>
+      </div>
+
+      <div class="presets-label">Quick topics — click to run:</div>
+      <div class="presets">
+        <button class="btn preset" data-topic="Agentic AI"
+          data-question="What's the latest in agentic AI, AI agents, and LLM orchestration?">Agentic AI</button>
+        <button class="btn preset" data-topic="AI General"
+          data-question="What are the most important recent AI developments overall?">AI General</button>
+        <button class="btn preset" data-topic="AGI"
+          data-question="Recent news, research, and serious debate on the path to AGI.">AGI</button>
+        <button class="btn preset" data-topic="AI Cybersecurity"
+          data-question="What's new in AI cybersecurity — AI-powered attacks and defenses, LLM/agent security, prompt injection, model vulnerabilities, and threats?">AI Cybersecurity</button>
+        <button class="btn preset" data-topic="Latest AI News"
+          data-question="The most significant AI news right now.">Latest AI News</button>
+      </div>
+
+      <div class="ask">
+        <input type="text" id="freeform" placeholder="Or ask your own: e.g. new LangGraph features and open-source agent frameworks" />
+        <button class="btn primary" id="research">Research</button>
+      </div>
+    </section>
+
+    <section id="status" class="status" hidden></section>
+
+    <article id="briefing" class="panel briefing" hidden></article>
+
+    <details id="sources" class="panel disclosure" hidden>
+      <summary><span class="ic ic-sources"></span> Sources &amp; scores</summary>
+      <div id="sourcesBody" class="disclosure-body"></div>
+    </details>
+
+    <details id="reasoning" class="panel disclosure" hidden>
+      <summary><span class="ic ic-reasoning"></span> Agent reasoning</summary>
+      <div id="reasoningBody" class="disclosure-body"></div>
+    </details>
+
+    <details class="panel disclosure about">
+      <summary><span class="ic ic-about"></span> About this app</summary>
+      <div class="disclosure-body about-body">
+        <p><b>Personalized AI News Agent</b> — a self-correcting research assistant
+          built to explore <b>agentic AI</b> patterns.</p>
+
+        <p><b>How it works — the agentic loop</b><br />
+          <code>plan → search → score → synthesize → reflect</code>. After drafting a
+          briefing, the <b>reflect</b> node critiques its own coverage, lists what's
+          missing, and loops back to run <i>targeted</i> searches — repeating until
+          coverage is solid or it hits your <b>max research passes</b> cap.</p>
+
+        <p><b>Substance tags</b></p>
+        <div class="legend">
+          <span class="cyber-tag tag-shipped">Shipped</span> generally available / released<br />
+          <span class="cyber-tag tag-announced">Announced</span> previewed or promised, not usable yet<br />
+          <span class="cyber-tag tag-research">Research</span> papers, findings, experiments<br />
+          <span class="cyber-tag tag-hype">Hype</span> speculation / marketing, low substance
+        </div>
+
+        <p><b>Technology behind it</b></p>
+        <div class="cyber-tech-grid">
+          <div class="cyber-tech tech-python"><span class="tic"></span><span class="tx"><b>TypeScript</b><small>Worker runtime</small></span></div>
+          <div class="cyber-tech tech-langgraph"><span class="tic"></span><span class="tx"><b>LangGraph.js</b><small>agent graph + reflect loop</small></span></div>
+          <div class="cyber-tech tech-langchain"><span class="tic"></span><span class="tx"><b>LangChain.js</b><small>LLM orchestration layer</small></span></div>
+          <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>OpenAI</b><small>gpt-4o-mini reasoning</small></span></div>
+          <div class="cyber-tech tech-tavily"><span class="tic"></span><span class="tx"><b>Tavily</b><small>recency-aware news search</small></span></div>
+          <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + static assets</small></span></div>
+        </div>
+
+        <p class="muted"><i>The Matrix rain, neon UI, sound FX, and ♫ background music
+          (bottom-right toggle) are pure flair — synthesized live, no audio files.</i></p>
+      </div>
+    </details>
+
+    <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + OpenAI + Tavily on Cloudflare ◢◤</footer>
+  </main>
+
+  <button id="musicBtn" class="music-btn" type="button">&#9835; MUSIC: OFF</button>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
+
+// =========================================================================== //
+// Matrix digital rain
+// =========================================================================== //
+(function matrixRain() {
+  const canvas = document.getElementById("matrix");
+  const ctx = canvas.getContext("2d");
+  const fs = 16;
+  let cols, drops, last;
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / fs);
+    drops = Array.from({ length: cols }, () => Math.random() * -120);
+    last = new Array(cols).fill("");
+  }
+  resize();
+  window.addEventListener("resize", resize);
+  const glyphs = "アイウエオカキクケコサシスセソタチツテトナニヌネノﾊﾋﾌﾍﾎ0123456789ABCDEF<>/|=+*#@$%&";
+  function draw() {
+    ctx.fillStyle = "rgba(4,7,10,0.10)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = fs + "px 'Share Tech Mono', monospace";
+    for (let i = 0; i < cols; i++) {
+      const ch = glyphs[(Math.random() * glyphs.length) | 0];
+      const x = i * fs, y = (drops[i] | 0) * fs;
+      ctx.fillStyle = "rgba(0,255,120,0.85)";
+      ctx.fillText(last[i] || ch, x, y - fs);
+      ctx.fillStyle = "#d8fff0";
+      ctx.fillText(ch, x, y);
+      last[i] = ch;
+      if (y > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i] += 0.85;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// =========================================================================== //
+// Neon cursor ring
+// =========================================================================== //
+(function cursorRing() {
+  const ring = document.querySelector(".cursor-ring");
+  let mx = innerWidth / 2, my = innerHeight / 2, rx = mx, ry = my;
+  const hit = (el) => el && el.closest && el.closest('button,a,[role="button"],summary,input,label');
+  addEventListener("mousemove", (e) => { mx = e.clientX; my = e.clientY; });
+  document.addEventListener("mouseover", (e) => ring.classList.toggle("hot", !!hit(e.target)), true);
+  (function follow() {
+    rx += (mx - rx) * 0.18; ry += (my - ry) * 0.18;
+    ring.style.transform = `translate3d(${rx}px,${ry}px,0)`;
+    requestAnimationFrame(follow);
+  })();
+})();
+
+// =========================================================================== //
+// Cyber sounds + generative background music (Web Audio, no files)
+// =========================================================================== //
+(function audio() {
+  let actx = null;
+  const ac = () => {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+    return actx;
+  };
+  const tone = (freq, dur = 0.08, type = "square", gain = 0.05) => {
+    const a = ac(), o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, a.currentTime);
+    g.gain.linearRampToValueAtTime(gain, a.currentTime + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(); o.stop(a.currentTime + dur);
+  };
+  const sClick = () => { tone(660, 0.06, "square", 0.06); setTimeout(() => tone(990, 0.05, "square", 0.04), 28); };
+  const sHover = () => tone(1250, 0.03, "sine", 0.022);
+  const isHit = (el) => el && el.closest && el.closest('button,a,[role="button"],summary');
+
+  let booted = false;
+  const boot = () => { if (booted) return; booted = true; tone(220, 0.12, "sawtooth", 0.05); setTimeout(() => tone(880, 0.18, "sawtooth", 0.04), 90); };
+
+  document.addEventListener("pointerdown", (e) => { boot(); if (isHit(e.target)) sClick(); }, true);
+  let lastHover = null;
+  document.addEventListener("mouseover", (e) => {
+    const t = isHit(e.target);
+    if (t && t !== lastHover) { lastHover = t; sHover(); }
+    if (!t) lastHover = null;
+  }, true);
+
+  // generative ambient track
+  let music = null;
+  const MVOL = 0.13;
+  function buildMusic() {
+    const a = ac();
+    const master = a.createGain(); master.gain.value = 0; master.connect(a.destination);
+    const delay = a.createDelay(); delay.delayTime.value = 0.33;
+    const fb = a.createGain(); fb.gain.value = 0.34;
+    delay.connect(fb); fb.connect(delay); delay.connect(master);
+    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 420; lp.Q.value = 7; lp.connect(master);
+    const d1 = a.createOscillator(); d1.type = "sawtooth"; d1.frequency.value = 55;
+    const d2 = a.createOscillator(); d2.type = "sawtooth"; d2.frequency.value = 82.4; d2.detune.value = 7;
+    const dg = a.createGain(); dg.gain.value = 0.12; d1.connect(dg); d2.connect(dg); dg.connect(lp);
+    const lfo = a.createOscillator(); lfo.frequency.value = 0.05;
+    const lfoG = a.createGain(); lfoG.gain.value = 260; lfo.connect(lfoG); lfoG.connect(lp.frequency);
+    d1.start(); d2.start(); lfo.start();
+    const scale = [220.0, 261.63, 293.66, 329.63, 392.0, 440.0, 523.25];
+    const note = () => {
+      const f = scale[(Math.random() * scale.length) | 0] * (Math.random() < 0.22 ? 2 : 1);
+      const o = a.createOscillator(); o.type = "square"; o.frequency.value = f;
+      const g = a.createGain(); g.gain.value = 0;
+      o.connect(g); g.connect(delay); g.connect(master);
+      const t = a.currentTime;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      o.start(t); o.stop(t + 0.3);
+    };
+    setInterval(() => { if (music && music.on) note(); }, 260);
+    music = { master, on: false };
+  }
+  function toggleMusic() {
+    if (!music) buildMusic();
+    ac();
+    music.on = !music.on;
+    const t = music.master.context.currentTime;
+    music.master.gain.cancelScheduledValues(t);
+    music.master.gain.setValueAtTime(music.master.gain.value, t);
+    music.master.gain.linearRampToValueAtTime(music.on ? MVOL : 0, t + 0.6);
+    return music.on;
+  }
+  const btn = document.getElementById("musicBtn");
+  btn.addEventListener("click", () => {
+    const on = toggleMusic();
+    btn.innerHTML = on ? "&#9835; MUSIC: ON" : "&#9835; MUSIC: OFF";
+    btn.classList.toggle("on", on);
+  });
+})();
+
+// =========================================================================== //
+// Substance-tag badges
+// =========================================================================== //
+const TAG_SLUG = { Shipped: "shipped", Announced: "announced", Research: "research", Hype: "hype" };
+const tagChip = (tag) => `<span class="cyber-tag tag-${TAG_SLUG[tag] || "announced"}">${tag}</span>`;
+const tagify = (text) =>
+  text.replace(/\[\[(SHIPPED|ANNOUNCED|RESEARCH|HYPE)\]\]/gi, (_, t) =>
+    tagChip(t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()),
+  );
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// =========================================================================== //
+// Controls + research
+// =========================================================================== //
+const $ = (id) => document.getElementById(id);
+const daysEl = $("days"), passesEl = $("passes");
+const briefingEl = $("briefing"), statusEl = $("status");
+const sourcesEl = $("sources"), sourcesBody = $("sourcesBody");
+const reasoningEl = $("reasoning"), reasoningBody = $("reasoningBody");
+let busy = false;
+
+daysEl.addEventListener("input", () => ($("daysVal").textContent = daysEl.value));
+passesEl.addEventListener("input", () => ($("passVal").textContent = passesEl.value));
+
+document.querySelectorAll(".preset").forEach((b) =>
+  b.addEventListener("click", () => runResearch(b.dataset.topic, b.dataset.question)),
+);
+$("research").addEventListener("click", () => {
+  const q = $("freeform").value.trim();
+  if (!q) { setStatus("Type a question above, or click a quick topic.", false); return; }
+  runResearch(q, q);
+});
+
+function setStatus(msg, spinning) {
+  statusEl.hidden = false;
+  statusEl.classList.toggle("err", msg.startsWith("⚠"));
+  statusEl.innerHTML = (spinning ? '<span class="spinner"></span>' : "") + esc(msg);
+}
+
+function setBusy(state) {
+  busy = state;
+  document.querySelectorAll(".btn").forEach((b) => (b.disabled = state));
+}
+
+async function runResearch(topic, question) {
+  if (busy) return;
+  setBusy(true);
+  setStatus(`Researching “${topic}” — plan → search → score → synthesize → reflect…`, true);
+  briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
+  try {
+    const res = await fetch("/api/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic, question,
+        days: Number(daysEl.value),
+        maxIterations: Number(passesEl.value),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    render(data);
+    statusEl.hidden = true;
+  } catch (e) {
+    setStatus("⚠ " + (e?.message || e), false);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function render(result) {
+  // briefing (markdown -> badges -> HTML)
+  briefingEl.innerHTML = marked.parse(tagify(result.answer || "_No briefing returned._"));
+  briefingEl.hidden = false;
+
+  // sources & scores
+  const docs = result.docs || [];
+  sourcesBody.innerHTML = docs.length
+    ? docs.map((d) =>
+        `<div class="src">${tagChip(d.tag || "Announced")} <b>${d.relevance}/10</b> — ` +
+        `<a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.title)}</a><br />` +
+        `<span class="meta">${esc(d.date || "date n/a")}</span><br />${esc(d.reason)}</div>`,
+      ).join("")
+    : "<p>No sources cleared the relevance bar.</p>";
+  sourcesEl.querySelector("summary").innerHTML =
+    `<span class="ic ic-sources"></span> Sources &amp; scores — ${docs.length} kept`;
+  sourcesEl.hidden = false;
+
+  // agent reasoning
+  const history = result.history || [];
+  reasoningBody.innerHTML = history.length
+    ? history.map((r) =>
+        `<div class="pass"><b>Pass ${r.iteration} → ${esc(r.decision)}</b><br />` +
+        (r.reasoning ? `${esc(r.reasoning)}<br />` : "") +
+        (r.gaps && r.gaps.length ? "Gaps identified:<br />" + r.gaps.map((g) => "• " + esc(g)).join("<br />") : "") +
+        `</div>`,
+      ).join("")
+    : "<p>No reasoning recorded.</p>";
+  reasoningEl.querySelector("summary").innerHTML =
+    `<span class="ic ic-reasoning"></span> Agent reasoning — ${history.length} pass(es)`;
+  reasoningEl.hidden = false;
+}
