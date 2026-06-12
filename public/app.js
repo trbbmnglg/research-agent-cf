@@ -258,6 +258,15 @@ async function runResearch(topic, question) {
     setStatus(`⚠ Enter your ${providerEl.value === "openai" ? "OpenAI" : "Anthropic"} API key and your Tavily API key above.`, false);
     return;
   }
+  // catch the common "pasted the other provider's key" mistake before calling out
+  if (providerEl.value === "anthropic" && apiKey.startsWith("sk-") && !apiKey.startsWith("sk-ant-")) {
+    setStatus("⚠ That looks like an OpenAI key. Switch the engine to OpenAI, or paste your Anthropic key (it starts with sk-ant-).", false);
+    return;
+  }
+  if (providerEl.value === "openai" && apiKey.startsWith("sk-ant-")) {
+    setStatus("⚠ That looks like an Anthropic key. Switch the engine to Claude, or paste your OpenAI key.", false);
+    return;
+  }
   setBusy(true);
   setStatus(`Researching “${topic}” — plan → search → score → synthesize → reflect…`, true);
   briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
