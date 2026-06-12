@@ -39,6 +39,51 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
 })();
 
 // =========================================================================== //
+// Matrix browser-tab title (decode effect) + animated matrix favicon
+// =========================================================================== //
+(function matrixTitle() {
+  const target = "◢◤ AI NEWS AGENT ◢◤";
+  const glyphs = "アイウエオカキクケコサシスセソタチツテト0123456789<>/|=+*#";
+  const HOLD = 16; // frames to hold the fully-decoded title before scrambling again
+  let i = 0;
+  setInterval(() => {
+    const reveal = Math.min(i, target.length);
+    let out = "";
+    for (let k = 0; k < target.length; k++) {
+      const ch = target[k];
+      out += k < reveal || !/[a-z0-9]/i.test(ch) ? ch : glyphs[(Math.random() * glyphs.length) | 0];
+    }
+    document.title = out;
+    i = (i + 1) % (target.length + HOLD);
+  }, 130);
+})();
+
+(function matrixFavicon() {
+  const size = 32, fs = 8, cols = size / fs;
+  const cv = document.createElement("canvas"); cv.width = size; cv.height = size;
+  const ctx = cv.getContext("2d");
+  const drops = Array.from({ length: cols }, () => Math.random() * -10);
+  const glyphs = "01アイｱ<>=+#";
+  let link = document.querySelector("link[rel~='icon']");
+  if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
+  setInterval(() => {
+    ctx.fillStyle = "rgba(0,8,4,0.4)";
+    ctx.fillRect(0, 0, size, size);
+    ctx.font = fs + "px monospace";
+    for (let c = 0; c < cols; c++) {
+      const ch = glyphs[(Math.random() * glyphs.length) | 0];
+      ctx.fillStyle = "rgba(0,255,120,0.7)";
+      ctx.fillText(ch, c * fs, ((drops[c] | 0) - 1) * fs);
+      ctx.fillStyle = "#caffe0";
+      ctx.fillText(ch, c * fs, (drops[c] | 0) * fs);
+      if (drops[c] * fs > size && Math.random() > 0.9) drops[c] = 0;
+      drops[c] += 1;
+    }
+    link.href = cv.toDataURL("image/png");
+  }, 220);
+})();
+
+// =========================================================================== //
 // Neon cursor ring
 // =========================================================================== //
 (function cursorRing() {
