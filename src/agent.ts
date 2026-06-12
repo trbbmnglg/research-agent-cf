@@ -120,7 +120,22 @@ function normalizeTag(tag: unknown): Tag {
 
 async function ask(llm: BaseChatModel, system: string, user: string): Promise<string> {
   const res = await llm.invoke([new SystemMessage(system), new HumanMessage(user)]);
-  return typeof res.content === "string" ? res.content : JSON.stringify(res.content);
+  const c = res.content as unknown;
+  if (typeof c === "string") return c;
+  // Anthropic adaptive/extended thinking returns an array of content blocks —
+  // keep only the text blocks (skip "thinking" blocks) so JSON parsing works.
+  if (Array.isArray(c)) {
+    return c
+      .map((b) =>
+        typeof b === "string"
+          ? b
+          : b && typeof b === "object" && "text" in b
+            ? String((b as { text?: unknown }).text ?? "")
+            : "",
+      )
+      .join("");
+  }
+  return String(c);
 }
 
 interface TavilyResult { url?: string; title?: string; content?: string; published_date?: string; }
@@ -176,14 +191,25 @@ type State = typeof StateAnnotation.State;
 // --------------------------------------------------------------------------- //
 function makeLlm(provider: Provider, model: string, apiKey: string, maxTokens: number): BaseChatModel {
   if (provider === "anthropic") {
-    return new ChatAnthropic({ apiKey, model, temperature: 0, maxTokens });
+    // Claude 4.6 / Fable use adaptive thinking and REJECT thinking.type.disabled.
+    // Claude 4.5 (Haiku) doesn't support adaptive but accepts disabled (cheaper/faster).
+    // `thinking` requires temperature: 1; disabled lets us pin a deterministic 0.
+    const adaptive = /-4-6|fable/.test(model);
+    return new ChatAnthropic({
+      apiKey,
+      model,
+      maxTokens,
+      thinking: adaptive ? { type: "adaptive" } : { type: "disabled" },
+      temperature: adaptive ? 1 : 0,
+    });
   }
   return new ChatOpenAI({ apiKey, model, temperature: 0, maxTokens });
 }
 
 function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey: string) {
-  const fastLlm = makeLlm(provider, model, apiKey, 1024);
-  const writerLlm = makeLlm(provider, model, apiKey, 3000);
+  // generous caps — adaptive/extended thinking tokens count against max_tokens
+  const fastLlm = makeLlm(provider, model, apiKey, 2048);
+  const writerLlm = makeLlm(provider, model, apiKey, 6000);
 
   // 1. plan — broad queries on the first pass; targeted gap-filling queries after.
   async function plan(state: State): Promise<Partial<State>> {
