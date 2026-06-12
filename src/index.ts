@@ -5,9 +5,9 @@
 // `run_worker_first: ["/api/*"]` in wrangler.jsonc means this Worker is only
 // invoked for /api/* routes; all other paths are served straight from /public.
 
-import { runResearch, MODELS, type Provider, type Env as AgentEnv } from "./agent";
+import { runResearch, MODELS, type Provider } from "./agent";
 
-interface Env extends AgentEnv {
+interface Env {
   ASSETS: Fetcher;
 }
 
@@ -18,6 +18,8 @@ interface ResearchBody {
   maxIterations?: number;
   provider?: string;
   model?: string;
+  apiKey?: string;
+  tavilyKey?: string;
 }
 
 export default {
@@ -37,28 +39,31 @@ export default {
         const body = (await request.json()) as ResearchBody;
         const provider: Provider = body.provider === "openai" ? "openai" : "anthropic";
 
-        // provider-specific secret check
-        const hasLlmKey = provider === "openai" ? !!env.OPENAI_API_KEY : !!env.ANTHROPIC_API_KEY;
-        const keyName = provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-        if (!hasLlmKey || !env.TAVILY_API_KEY) {
-          const missing = !hasLlmKey ? keyName : "TAVILY_API_KEY";
-          return Response.json(
-            { error: `Server missing ${missing}. Set it with \`wrangler secret put\` (or .dev.vars locally).` },
-            { status: 500 },
-          );
+        // BYOK — keys come from the user's request, used in-memory only and never
+        // stored, logged, or persisted. No server-side env fallback (so visitors
+        // can't spend the owner's keys).
+        const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+        const tavilyKey = typeof body.tavilyKey === "string" ? body.tavilyKey.trim() : "";
+        if (!apiKey) {
+          return Response.json({ error: `Enter your ${provider === "openai" ? "OpenAI" : "Anthropic"} API key.` }, { status: 400 });
+        }
+        if (!tavilyKey) {
+          return Response.json({ error: "Enter your Tavily API key." }, { status: 400 });
         }
 
         const topic = (body.topic || body.question || "").trim();
         const question = (body.question || body.topic || "").trim();
         if (!topic) return Response.json({ error: "Provide a topic or question." }, { status: 400 });
 
-        const result = await runResearch(env, {
+        const result = await runResearch({
           question,
           topic,
           days: clampInt(body.days, 1, 30, 7),
           maxIterations: clampInt(body.maxIterations, 1, 5, 3),
           provider,
           model: typeof body.model === "string" ? body.model : undefined,
+          apiKey,
+          tavilyKey,
         });
         return Response.json(result);
       } catch (e) {

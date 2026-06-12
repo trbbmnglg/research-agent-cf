@@ -51,6 +51,16 @@
         </label>
       </div>
 
+      <div class="keys">
+        <label><span id="llmKeyText">Anthropic API key</span>
+          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+        </label>
+        <label>Tavily API key
+          <input type="password" id="tavilyKey" placeholder="tvly-..." autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
+      <p class="keys-note">🔒 <b>Bring your own keys.</b> They're sent only with your request and used in-memory to call the model &amp; search — <b>never stored, logged, or saved</b> (not on the server, not in your browser). Free Tavily key at <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a>.</p>
+
       <div class="presets-label">Quick topics — click to run:</div>
       <div class="presets">
         <button class="btn preset" data-topic="Agentic AI"

@@ -199,6 +199,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const $ = (id) => document.getElementById(id);
 const daysEl = $("days"), passesEl = $("passes");
 const providerEl = $("provider"), modelEl = $("model");
+const apiKeyEl = $("apiKey"), tavilyKeyEl = $("tavilyKey");
 const briefingEl = $("briefing"), statusEl = $("status");
 const sourcesEl = $("sources"), sourcesBody = $("sourcesBody");
 const reasoningEl = $("reasoning"), reasoningBody = $("reasoningBody");
@@ -216,12 +217,18 @@ function populateModels() {
   const list = MODELS[providerEl.value] || [];
   modelEl.innerHTML = list.map((m) => `<option value="${m.id}">${m.label}</option>`).join("");
 }
-providerEl.addEventListener("change", populateModels);
+function updateKeyLabel() {
+  const openai = providerEl.value === "openai";
+  $("llmKeyText").textContent = openai ? "OpenAI API key" : "Anthropic API key";
+  apiKeyEl.placeholder = openai ? "sk-..." : "sk-ant-...";
+}
+providerEl.addEventListener("change", () => { populateModels(); updateKeyLabel(); });
 fetch("/api/models")
   .then((r) => r.json())
   .then((data) => { if (data && data.anthropic) MODELS = data; populateModels(); })
   .catch(() => populateModels());
 populateModels();
+updateKeyLabel();
 
 document.querySelectorAll(".preset").forEach((b) =>
   b.addEventListener("click", () => runResearch(b.dataset.topic, b.dataset.question)),
@@ -245,6 +252,12 @@ function setBusy(state) {
 
 async function runResearch(topic, question) {
   if (busy) return;
+  const apiKey = apiKeyEl.value.trim();
+  const tavilyKey = tavilyKeyEl.value.trim();
+  if (!apiKey || !tavilyKey) {
+    setStatus(`⚠ Enter your ${providerEl.value === "openai" ? "OpenAI" : "Anthropic"} API key and your Tavily API key above.`, false);
+    return;
+  }
   setBusy(true);
   setStatus(`Researching “${topic}” — plan → search → score → synthesize → reflect…`, true);
   briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
@@ -258,6 +271,8 @@ async function runResearch(topic, question) {
         maxIterations: Number(passesEl.value),
         provider: providerEl.value,
         model: modelEl.value,
+        apiKey,
+        tavilyKey,
       }),
     });
     const data = await res.json();

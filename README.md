@@ -51,32 +51,33 @@ API calls; everything else is served straight from `public/` by the assets bindi
 npm install
 ```
 
-### Local development
+### Bring your own keys (BYOK)
 
-```bash
-cp .dev.vars.example .dev.vars     # then edit .dev.vars with your keys
-npm run dev                        # wrangler dev -> http://localhost:8787
-```
-
-`.dev.vars` holds your secrets for local runs:
+This app does **not** use server-side API keys. Each user enters their own keys in
+the UI — an **LLM key** for the engine they pick (Anthropic or OpenAI) and a
+**Tavily key** for search:
 
 | Key | Where to get it |
 | --- | --- |
-| `ANTHROPIC_API_KEY` | <https://console.anthropic.com> — needed if you pick the Claude engine |
-| `OPENAI_API_KEY` | <https://platform.openai.com/api-keys> — needed if you pick the OpenAI engine |
-| `TAVILY_API_KEY` | <https://app.tavily.com> — free tier, no card |
+| Anthropic | <https://console.anthropic.com> (for the Claude engine) |
+| OpenAI | <https://platform.openai.com/api-keys> (for the OpenAI engine) |
+| Tavily | <https://app.tavily.com> — free tier, no card |
 
-> Pick the **engine** (Claude or OpenAI) and **model** in the UI. You only need the
-> API key for the provider you choose, plus `TAVILY_API_KEY` for search. The UI and
-> all cyber effects load even without keys.
+> **Privacy:** keys are sent only with each request and used in-memory to call the
+> model + search. They are **never stored, logged, or persisted** — not on the
+> server, not in the browser. No Cloudflare Worker secrets are required.
+
+### Local development
+
+```bash
+npm run dev        # wrangler dev -> http://localhost:8787 (enter keys in the UI)
+```
 
 ### Deploy to Cloudflare
 
 ```bash
 npx wrangler login
-npx wrangler secret put ANTHROPIC_API_KEY   # and/or OPENAI_API_KEY
-npx wrangler secret put TAVILY_API_KEY
-npm run deploy
+npm run deploy     # no secrets to set — it's BYOK
 ```
 
 ---
@@ -121,7 +122,7 @@ research-agent-cf/
 
 ## Notes
 
-- **Subrequests:** each run makes several OpenAI + Tavily calls. The Workers free
+- **Subrequests:** each run makes several LLM + Tavily calls. The Workers free
   plan caps subrequests at 50/request; the paid plan allows 1000. For very long
   multi-pass runs, consider Cloudflare **Workflows** / the **Agents SDK** (durable,
   streaming) — clean upgrade path; the nodes here are already isolated functions.

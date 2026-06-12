@@ -76,6 +76,13 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
 .selects select:focus{ outline:none; border-color:var(--cy); box-shadow:0 0 12px rgba(0,240,255,.5); }
 .selects option{ background:#06101c; color:var(--ink); }
 
+.keys{ display:flex; flex-wrap:wrap; gap:24px; margin-bottom:8px; }
+.keys label{ display:flex; flex-direction:column; gap:6px; font-family:'Share Tech Mono',monospace; font-size:.82rem; color:#9fe9ff; flex:1 1 220px; }
+.keys input{ background:rgba(7,16,28,.7); color:var(--ink); border:1px solid rgba(0,240,255,.4); padding:9px 10px; font-family:'Share Tech Mono',monospace; }
+.keys input:focus{ outline:none; border-color:var(--cy); box-shadow:0 0 12px rgba(0,240,255,.5); }
+.keys-note{ font-size:.78rem; color:var(--ink-dim); margin:2px 0 14px; line-height:1.5; }
+.keys-note b{ color:#9dffc4; }
+
 .presets-label{ font-family:'Share Tech Mono',monospace; color:#9fe9ff; font-size:.8rem; margin:6px 0; }
 .presets{ display:flex; flex-wrap:wrap; gap:10px; }
 

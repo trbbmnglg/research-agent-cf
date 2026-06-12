@@ -91,12 +91,8 @@ export interface ResearchParams {
   maxIterations?: number;
   provider?: Provider;
   model?: string;
-}
-
-export interface Env {
-  OPENAI_API_KEY?: string;
-  ANTHROPIC_API_KEY?: string;
-  TAVILY_API_KEY: string;
+  apiKey: string; // user-supplied LLM key (BYOK) — used in-memory, never stored
+  tavilyKey: string; // user-supplied Tavily key (BYOK)
 }
 
 // --------------------------------------------------------------------------- //
@@ -178,16 +174,16 @@ type State = typeof StateAnnotation.State;
 // Graph factory — built per request so nodes can close over the LLM clients
 // (Workers inject secrets via env, not process.env).
 // --------------------------------------------------------------------------- //
-function makeLlm(provider: Provider, model: string, env: Env, maxTokens: number): BaseChatModel {
+function makeLlm(provider: Provider, model: string, apiKey: string, maxTokens: number): BaseChatModel {
   if (provider === "anthropic") {
-    return new ChatAnthropic({ apiKey: env.ANTHROPIC_API_KEY, model, temperature: 0, maxTokens });
+    return new ChatAnthropic({ apiKey, model, temperature: 0, maxTokens });
   }
-  return new ChatOpenAI({ apiKey: env.OPENAI_API_KEY, model, temperature: 0, maxTokens });
+  return new ChatOpenAI({ apiKey, model, temperature: 0, maxTokens });
 }
 
-function buildGraph(env: Env, provider: Provider, model: string) {
-  const fastLlm = makeLlm(provider, model, env, 1024);
-  const writerLlm = makeLlm(provider, model, env, 3000);
+function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey: string) {
+  const fastLlm = makeLlm(provider, model, apiKey, 1024);
+  const writerLlm = makeLlm(provider, model, apiKey, 3000);
 
   // 1. plan — broad queries on the first pass; targeted gap-filling queries after.
   async function plan(state: State): Promise<Partial<State>> {
@@ -230,7 +226,7 @@ function buildGraph(env: Env, provider: Provider, model: string) {
     const seen = new Set(state.docs.map((d) => d.url));
     const newDocs: Doc[] = [];
     for (const q of state.queries) {
-      const results = await tavilySearch(env.TAVILY_API_KEY, q, state.days);
+      const results = await tavilySearch(tavilyKey, q, state.days);
       for (const r of results) {
         const url = r.url;
         if (!url || seen.has(url)) continue;
@@ -371,10 +367,10 @@ function buildGraph(env: Env, provider: Provider, model: string) {
 // --------------------------------------------------------------------------- //
 // Public entry point
 // --------------------------------------------------------------------------- //
-export async function runResearch(env: Env, params: ResearchParams) {
+export async function runResearch(params: ResearchParams) {
   const provider: Provider = params.provider === "openai" ? "openai" : "anthropic";
   const model = resolveModel(provider, params.model);
-  const app = buildGraph(env, provider, model);
+  const app = buildGraph(provider, model, params.apiKey, params.tavilyKey);
   const initial: State = {
     question: params.question,
     topic: params.topic,
