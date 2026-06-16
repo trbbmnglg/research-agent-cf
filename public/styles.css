@@ -124,8 +124,13 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
   filter:drop-shadow(0 0 4px rgba(0,240,255,.7));
 }
 .briefing ul{ list-style:none; padding-left:0; }
-.briefing li{ margin:.6rem 0; padding-left:0; line-height:1.6; }
+.briefing li{ margin:.8rem 0; padding-left:0; line-height:1.6; }
 .briefing p{ line-height:1.6; }
+.briefing li a[href]{ color:var(--ink-dim); font-family:'Share Tech Mono',monospace; font-size:.8rem;
+  border:1px solid rgba(0,240,255,.3); padding:1px 7px; margin-left:4px;
+  clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),calc(100% - 4px) 100%,0 100%,0 4px);
+  text-decoration:none; transition:color .15s, border-color .15s; white-space:nowrap; }
+.briefing li a[href]:hover{ color:var(--cy); border-color:var(--cy); }
 
 /* ---------- disclosures (details/summary) ---------- */
 .disclosure{ padding:0; }

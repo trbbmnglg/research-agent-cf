@@ -371,9 +371,10 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
       "- Within a group, keep the given order (most relevant first).\n" +
       "- Each item is one list entry (- ) that STARTS with its substance token, copied verbatim " +
       "from the input — exactly one of [[SHIPPED]] [[ANNOUNCED]] [[RESEARCH]] [[HYPE]] — " +
-      "then the headline, the date, and an inline markdown link to the source. " +
+      "then the headline and the source name and date (NO URL here). " +
       "Do not reword the token or replace it with emoji.\n" +
-      "- On the next line (indented), add a short 'Why this matters:' tied to the reader's role/stack.\n" +
+      "- On the next line (indented, 2 spaces), write the description and 'Why this matters:' line.\n" +
+      "- On the line after that (indented, 2 spaces), end with a reference link in this exact format: [→ source](url)\n" +
       "- Strip hype and marketing; be plain and useful. Do NOT invent facts beyond the excerpts.\n" +
       "- Start with a one-sentence TL;DR, then the grouped items.";
     const user =
