@@ -1,10 +1,15 @@
 // The research agent: a self-correcting LangGraph.js graph.
 //
-//   plan -> search -> score -> synthesize -> reflect
-//                                                |
-//                       done? --yes--> END       |
-//                         ^                       |
-//                         |--no---- back to plan (re-plan on the gaps reflect found)
+//   researcher (tool-calling) -> score -> synthesize -> reflect
+//        ^                                                 |
+//        |---- gaps? loop back ────────────────────────────┤
+//                                                          ▼
+//                                    coverage good OR cap hit -> END
+//
+// The `researcher` node binds a search_news tool to Claude and lets it decide
+// what to search, how many queries to run, and when it has enough material.
+// `reflect` critiques the draft and hands gaps back to `researcher` if coverage
+// is thin, repeating until sufficient or the iteration cap is hit.
 //
 // The `reflect` node critiques the agent's own draft, decides whether coverage
 // is sufficient, and — if not — hands `gaps` back to `plan` so the next pass
@@ -14,7 +19,9 @@ import { END, START, StateGraph, Annotation } from "@langchain/langgraph";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
 import { PROFILE, type Profile } from "./profile";
 
 // --------------------------------------------------------------------------- //
@@ -176,7 +183,6 @@ const StateAnnotation = Annotation.Root({
   topic: Annotation<string>(),
   days: Annotation<number>(),
   profile: Annotation<Profile>(),
-  queries: Annotation<string[]>(),
   docs: Annotation<Doc[]>(),
   answer: Annotation<string>(),
   iteration: Annotation<number>(),
@@ -213,65 +219,97 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
   const fastLlm = makeLlm(provider, model, apiKey, 2048);
   const writerLlm = makeLlm(provider, model, apiKey, 6000);
 
-  // 1. plan — broad queries on the first pass; targeted gap-filling queries after.
-  async function plan(state: State): Promise<Partial<State>> {
-    const firstPass = state.iteration === 0 || state.gaps.length === 0;
-    let system: string, user: string;
-    if (firstPass) {
-      system =
-        "You plan web-news searches for a personalized AI briefing. Given a topic, " +
-        "a request, and the reader's profile, write exactly 3 focused search queries " +
-        "for RECENT AI news that matter to this reader. Cover different angles; prefer " +
-        "concrete events. Reply with ONLY a JSON array of 3 strings.";
-      const gapHint = priorGaps.length > 0
-        ? `\nBlind spots from previous runs on this topic (address at least one in your queries): ${JSON.stringify(priorGaps.slice(0, 5))}`
-        : "";
-      user =
-        `Topic: ${state.topic}\nRequest: ${state.question}\n` +
-        `Reader profile: ${JSON.stringify(state.profile)}${gapHint}\n` +
-        "Return a JSON array of exactly 3 query strings.";
-    } else {
-      system =
-        "You refine searches to fill specific gaps in an AI news briefing. Given the " +
-        "gaps a critic found, write 2-3 TARGETED search queries that surface exactly " +
-        "the missing information. Be specific. Reply with ONLY a JSON array of strings.";
-      user =
-        `Topic: ${state.topic}\nOriginal request: ${state.question}\n` +
-        `Reader profile: ${JSON.stringify(state.profile)}\n` +
-        `Gaps to fill: ${JSON.stringify(state.gaps)}\n` +
-        "Return a JSON array of 2-3 query strings.";
-    }
-    try {
-      const raw = await ask(fastLlm, system, user);
-      const parsed = extractJson<unknown[]>(raw);
-      const queries = parsed.filter((q): q is string => typeof q === "string" && q.trim().length > 0).slice(0, 3);
-      if (queries.length === 0) throw new Error("empty");
-      return { queries };
-    } catch {
-      return { queries: [state.topic || state.question] };
-    }
-  }
-
-  // 2. search — run all queries in parallel, APPEND new docs, dedupe by URL across passes.
-  async function search(state: State): Promise<Partial<State>> {
-    const seen = new Set(state.docs.map((d) => d.url));
-    const allResults = await Promise.all(
-      state.queries.map((q) => tavilySearch(tavilyKey, q, state.days)),
-    );
+  // 1. researcher — tool-calling node: Claude decides what to search and when to stop.
+  //    Replaces the old hardcoded plan → search pipeline.
+  async function researcher(state: State): Promise<Partial<State>> {
+    const seenUrls = new Set(state.docs.map((d) => d.url));
     const newDocs: Doc[] = [];
-    for (const results of allResults) {
-      for (const r of results) {
-        const url = r.url;
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-        newDocs.push({
-          url,
-          title: r.title || url,
-          content: (r.content || "").slice(0, 1500),
-          date: r.published_date || "",
-        });
+
+    // The search tool — Claude calls this; we execute via Tavily, dedupe by URL.
+    const searchTool = tool(
+      async ({ query }: { query: string }): Promise<string> => {
+        const results = await tavilySearch(tavilyKey, query, state.days);
+        const fresh: Doc[] = [];
+        for (const r of results) {
+          if (!r.url || seenUrls.has(r.url)) continue;
+          seenUrls.add(r.url);
+          fresh.push({
+            url: r.url,
+            title: r.title || r.url,
+            content: (r.content || "").slice(0, 1500),
+            date: r.published_date || "",
+          });
+        }
+        newDocs.push(...fresh);
+        return fresh.length > 0
+          ? `Found ${fresh.length} articles: ${fresh.map((d) => `"${d.title}" (${d.date})`).join(", ")}`
+          : "No new articles found for this query.";
+      },
+      {
+        name: "search_news",
+        description:
+          "Search for recent AI news articles on a specific angle. " +
+          "Call this tool multiple times with different queries to cover the topic comprehensively.",
+        schema: z.object({
+          query: z.string().describe("A specific search query for recent AI news"),
+        }),
+      },
+    );
+
+    // bindTools is defined on ChatAnthropic/ChatOpenAI but typed as optional on BaseChatModel
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const llmWithTools = fastLlm.bindTools!([searchTool]);
+
+    const isFirstPass = state.iteration === 0;
+    const gapContext = isFirstPass && priorGaps.length > 0
+      ? `\nKnown blind spots from previous runs on this topic (address at least one): ${JSON.stringify(priorGaps.slice(0, 5))}`
+      : state.gaps.length > 0
+      ? `\nGaps to fill from the previous draft's critique: ${JSON.stringify(state.gaps)}`
+      : "";
+
+    const messages: BaseMessage[] = [
+      new SystemMessage(
+        "You are a news research assistant gathering articles for a personalized AI briefing.\n" +
+        "Use the search_news tool to find relevant articles. Call it 2–4 times with varied queries " +
+        "to cover the topic from multiple angles (broad overview, specific sub-topics, key players).\n" +
+        "Stop calling tools once you have gathered enough material."
+      ),
+      new HumanMessage(
+        `Topic: ${state.topic}\nRequest: ${state.question}\n` +
+        `Reader profile: ${JSON.stringify(state.profile)}${gapContext}`
+      ),
+    ];
+
+    // Tool-calling loop: Claude decides how many searches to run.
+    const MAX_ROUNDS = 3;
+    try {
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const response = (await llmWithTools.invoke(messages)) as AIMessage;
+        messages.push(response);
+
+        const toolCalls = response.tool_calls ?? [];
+        if (toolCalls.length === 0) break;
+
+        // Execute all tool calls in parallel (same pattern as before).
+        const toolMsgs = await Promise.all(
+          toolCalls.map(async (call) => {
+            try {
+              const result = await searchTool.invoke(call.args as { query: string });
+              return new ToolMessage({ tool_call_id: call.id ?? "call", content: String(result) });
+            } catch (e) {
+              return new ToolMessage({
+                tool_call_id: call.id ?? "call",
+                content: `Search failed: ${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          }),
+        );
+        messages.push(...toolMsgs);
       }
+    } catch (e) {
+      console.error("[researcher] tool loop failed:", e);
     }
+
     return { docs: [...state.docs, ...newDocs] };
   }
 
@@ -328,14 +366,14 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     const system =
       "You write a concise, personalized AI-news briefing in markdown.\n" +
       "Rules:\n" +
-      "- Do NOT use emoji anywhere — no emoji in headers, bullets, or body text.\n" +
-      "- Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text for section headers.\n" +
+      "- Do NOT use emoji anywhere — no emoji in headers, items, or body text.\n" +
+      "- Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text.\n" +
       "- Within a group, keep the given order (most relevant first).\n" +
-      "- Each item is one bullet that STARTS with its substance token, copied verbatim " +
+      "- Each item is one list entry (- ) that STARTS with its substance token, copied verbatim " +
       "from the input — exactly one of [[SHIPPED]] [[ANNOUNCED]] [[RESEARCH]] [[HYPE]] — " +
-      "then the headline. Do not reword the token or replace it with emoji.\n" +
-      "- Add a 'Why this matters to you:' line tied to the reader's role/stack/interests.\n" +
-      "- Include the date and an inline markdown link to the source.\n" +
+      "then the headline, the date, and an inline markdown link to the source. " +
+      "Do not reword the token or replace it with emoji.\n" +
+      "- On the next line (indented), add a short 'Why this matters:' tied to the reader's role/stack.\n" +
       "- Strip hype and marketing; be plain and useful. Do NOT invent facts beyond the excerpts.\n" +
       "- Start with a one-sentence TL;DR, then the grouped items.";
     const user =
@@ -388,17 +426,15 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
   const route = (state: State): "continue" | "end" => (state.done ? "end" : "continue");
 
   const graph = new StateGraph(StateAnnotation)
-    .addNode("plan", plan)
-    .addNode("search", search)
+    .addNode("researcher", researcher)
     .addNode("score", score)
     .addNode("synthesize", synthesize)
     .addNode("reflect", reflect)
-    .addEdge(START, "plan")
-    .addEdge("plan", "search")
-    .addEdge("search", "score")
+    .addEdge(START, "researcher")
+    .addEdge("researcher", "score")
     .addEdge("score", "synthesize")
     .addEdge("synthesize", "reflect")
-    .addConditionalEdges("reflect", route, { continue: "plan", end: END });
+    .addConditionalEdges("reflect", route, { continue: "researcher", end: END });
 
   return graph.compile();
 }
@@ -415,7 +451,6 @@ export async function runResearch(params: ResearchParams) {
     topic: params.topic,
     days: params.days ?? 7,
     profile: PROFILE,
-    queries: [],
     docs: [],
     answer: "",
     iteration: 0,
