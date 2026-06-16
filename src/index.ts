@@ -15,7 +15,7 @@ const CRON_TOPIC = "Agentic AI and LLM developments";
 const CRON_QUESTION =
   "What's the latest in agentic AI, AI agents, LLM orchestration, and major AI model releases?";
 const CRON_DAYS = 7;
-const CRON_MAX_ITERATIONS = 3;
+const CRON_MAX_ITERATIONS = 2;
 const CRON_MODEL = "claude-haiku-4-5-20251001";
 const HISTORY_PAGE_SIZE = 20;
 
@@ -223,7 +223,7 @@ export default {
         const timeout = setTimeout(() => {
           emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." });
           void close();
-        }, 25_000);
+        }, 28_000);
 
         try {
           const stored = await runAndStore(

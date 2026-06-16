@@ -302,7 +302,7 @@ function buildGraph(
     ];
 
     // Tool-calling loop: Claude decides how many searches to run.
-    const MAX_ROUNDS = 3;
+    const MAX_ROUNDS = 2;
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const response = (await llmWithTools.invoke(messages)) as AIMessage;
@@ -355,9 +355,11 @@ function buildGraph(
             `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
             `Article:\nTitle: ${doc.title}\nDate: ${doc.date}\nContent: ${doc.content}`;
           try {
-            const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(
-              await ask(fastLlm, system, user),
-            );
+            const raw = await Promise.race([
+              ask(fastLlm, system, user),
+              new Promise<never>((_, rej) => setTimeout(() => rej(new Error("score timeout")), 5_000)),
+            ]);
+            const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(raw);
             doc.relevance = Math.max(0, Math.min(10, Math.round(Number(v.relevance ?? 5))));
             doc.reason = String(v.reason ?? "").trim() || "(no reason)";
             doc.tag = normalizeTag(v.tag);
