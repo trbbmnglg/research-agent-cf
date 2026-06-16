@@ -471,6 +471,20 @@ async function runManual(topic, question) {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const handleSse = (ev) => {
+      if (ev.type === "result") {
+        renderWithMeta(ev);
+        statusEl.hidden = true;
+        runPanel.hidden = true;
+        toggleBtn.textContent = "[ RUN NOW ]";
+      } else if (ev.type === "error") {
+        setStatus("⚠ " + esc(ev.message || "Unknown error"), false);
+      } else {
+        const msg = statusForEvent(ev);
+        if (msg) setStatus(msg, true);
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -483,21 +497,15 @@ async function runManual(topic, question) {
       for (const part of parts) {
         const line = part.trim();
         if (!line.startsWith("data: ")) continue;
-        let ev;
-        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
-
-        if (ev.type === "result") {
-          renderWithMeta(ev);
-          statusEl.hidden = true;
-          runPanel.hidden = true;
-          toggleBtn.textContent = "[ RUN NOW ]";
-        } else if (ev.type === "error") {
-          setStatus("⚠ " + esc(ev.message || "Unknown error"), false);
-        } else {
-          const msg = statusForEvent(ev);
-          if (msg) setStatus(msg, true);
-        }
+        try { handleSse(JSON.parse(line.slice(6))); } catch {}
       }
+    }
+
+    // Flush any partial frame left in buffer when the stream closes without
+    // a trailing \n\n (the result event commonly ends up here).
+    const remaining = buffer.trim();
+    if (remaining.startsWith("data: ")) {
+      try { handleSse(JSON.parse(remaining.slice(6))); } catch {}
     }
   } catch (e) {
     setStatus("⚠ " + (e?.message || e), false);

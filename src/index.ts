@@ -215,26 +215,26 @@ export default {
       // Fire-and-forget: stream progress events then the final result.
       // ctx.waitUntil keeps the Worker alive until the stream closes.
       ctx.waitUntil((async () => {
-        const emit = (data: object) => {
-          try { writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
+        const emit = (data: object): Promise<void> => {
+          try { return writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); }
+          catch { return Promise.resolve(); }
         };
         const close = async () => { try { await writer.close(); } catch {} };
 
         const timeout = setTimeout(() => {
-          emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." });
-          void close();
+          void emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." }).finally(close);
         }, 28_000);
 
         try {
           const stored = await runAndStore(
             env, topic, question, days, maxIter, model, "manual",
-            (event) => emit(event),
+            (event) => { void emit(event); },
           );
           clearTimeout(timeout);
-          emit({ type: "result", ...stored });
+          await emit({ type: "result", ...stored });
         } catch (e) {
           clearTimeout(timeout);
-          emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
+          await emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
         } finally {
           await close();
         }
