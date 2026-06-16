@@ -327,6 +327,16 @@ function buildGraph(
         );
         messages.push(...toolMsgs);
       }
+
+      // If MAX_ROUNDS was reached with tool results still pending (Claude called tools
+      // in every round), give it one final tool-free pass so it can acknowledge what
+      // it found. Without this, the last round's results are collected but never
+      // processed by the LLM, leaving a dangling ToolMessage at the end of history.
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg instanceof ToolMessage) {
+        const ack = (await fastLlm.invoke(messages)) as AIMessage;
+        messages.push(ack);
+      }
     } catch (e) {
       console.error("[researcher] tool loop failed:", e);
     }
@@ -355,17 +365,23 @@ function buildGraph(
             `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
             `Article:\nTitle: ${doc.title}\nDate: ${doc.date}\nContent: ${doc.content}`;
           try {
+            let scoreTimer: ReturnType<typeof setTimeout> | undefined;
             const raw = await Promise.race([
               ask(fastLlm, system, user),
-              new Promise<never>((_, rej) => setTimeout(() => rej(new Error("score timeout")), 5_000)),
-            ]);
+              new Promise<never>((_, rej) => {
+                scoreTimer = setTimeout(() => rej(new Error("score timeout")), 5_000);
+              }),
+            ]).finally(() => clearTimeout(scoreTimer));
             const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(raw);
             doc.relevance = Math.max(0, Math.min(10, Math.round(Number(v.relevance ?? 5))));
             doc.reason = String(v.reason ?? "").trim() || "(no reason)";
             doc.tag = normalizeTag(v.tag);
-          } catch {
-            doc.relevance = 5;
-            doc.reason = "(unscored — could not parse model output)";
+          } catch (e) {
+            // Timed-out docs get relevance 0 (dropped by the floor filter).
+            // Parse/network failures get 5 so the article still has a chance.
+            const isTimeout = e instanceof Error && e.message === "score timeout";
+            doc.relevance = isTimeout ? 0 : 5;
+            doc.reason = isTimeout ? "(score timed out)" : "(unscored — could not parse model output)";
             doc.tag = "Announced";
           }
         }),

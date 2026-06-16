@@ -36,57 +36,88 @@ interface Env {
 
 // ── Email delivery (Resend REST API) ─────────────────────────────────────── //
 
+function htmlEsc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Only allow http/https links — block javascript: and other schemes.
+function safeHref(raw: string): string {
+  try {
+    const p = new URL(raw);
+    return p.protocol === "https:" || p.protocol === "http:" ? raw : "#";
+  } catch { return "#"; }
+}
+
 function briefingToHtml(md: string): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // Strip emoji the LLM occasionally includes despite the prompt instruction.
+  const clean = md
+    .replace(/\p{Emoji_Presentation}/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/ {2,}/g, " ");
 
   const TAG_BG: Record<string, string> = {
     Shipped: "#16a34a", Announced: "#d97706", Research: "#2563eb", Hype: "#dc2626",
   };
   const inline = (s: string): string => {
-    let t = esc(s);
+    let t = htmlEsc(s);
     t = t.replace(/\[\[(SHIPPED|ANNOUNCED|RESEARCH|HYPE)\]\]/gi, (_, tag) => {
       const label = tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase();
       const bg = TAG_BG[label] ?? "#6b7280";
       return `<span style="background:${bg};color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:600;letter-spacing:.3px">${label}</span>`;
     });
     t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#0ea5e9;text-decoration:none">$1</a>');
+    // Validate URL scheme before inserting into href to block javascript: injection.
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+      const href = htmlEsc(safeHref(url.replace(/&amp;/g, "&")));
+      return `<a href="${href}" style="color:#0ea5e9;text-decoration:none">${text}</a>`;
+    });
     return t;
   };
 
   const rows: string[] = [];
-  for (const raw of md.split("\n")) {
+  let inList = false;
+  const closeList = () => { if (inList) { rows.push("</ul>"); inList = false; } };
+
+  for (const raw of clean.split("\n")) {
     const h2 = raw.match(/^## (.+)/);
-    if (h2) { rows.push(`<h2 style="margin:22px 0 6px;font-size:16px;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:4px">${inline(h2[1])}</h2>`); continue; }
+    if (h2) { closeList(); rows.push(`<h2 style="margin:22px 0 6px;font-size:16px;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:4px">${inline(h2[1])}</h2>`); continue; }
     const h3 = raw.match(/^### (.+)/);
-    if (h3) { rows.push(`<h3 style="margin:16px 0 4px;font-size:14px;color:#1e293b">${inline(h3[1])}</h3>`); continue; }
+    if (h3) { closeList(); rows.push(`<h3 style="margin:16px 0 4px;font-size:14px;color:#1e293b">${inline(h3[1])}</h3>`); continue; }
     const h1 = raw.match(/^# (.+)/);
-    if (h1) { rows.push(`<h1 style="margin:0 0 14px;font-size:19px;color:#0f172a">${inline(h1[1])}</h1>`); continue; }
+    if (h1) { closeList(); rows.push(`<h1 style="margin:0 0 14px;font-size:19px;color:#0f172a">${inline(h1[1])}</h1>`); continue; }
     const bq = raw.match(/^> (.+)/);
-    if (bq) { rows.push(`<blockquote style="border-left:3px solid #0ea5e9;margin:10px 0;padding:8px 14px;background:#f0f9ff;color:#0369a1;border-radius:0 4px 4px 0">${inline(bq[1])}</blockquote>`); continue; }
-    const li = raw.match(/^[*\-] (.+)/);
-    if (li) { rows.push(`<li style="margin:3px 0">${inline(li[1])}</li>`); continue; }
+    if (bq) { closeList(); rows.push(`<blockquote style="border-left:3px solid #0ea5e9;margin:10px 0;padding:8px 14px;background:#f0f9ff;color:#0369a1;border-radius:0 4px 4px 0">${inline(bq[1])}</blockquote>`); continue; }
+    const li = raw.match(/^[*-] (.+)/);
+    if (li) {
+      if (!inList) { rows.push('<ul style="margin:8px 0;padding-left:20px">'); inList = true; }
+      rows.push(`<li style="margin:3px 0">${inline(li[1])}</li>`);
+      continue;
+    }
+    closeList();
     if (!raw.trim()) { rows.push("<br>"); continue; }
     rows.push(`<p style="margin:5px 0;line-height:1.6">${inline(raw)}</p>`);
   }
+  closeList();
   return rows.join("\n");
 }
 
 function buildEmailHtml(
   topic: string, runAt: string, model: string, answer: string, docCount: number,
 ): string {
-  const date = new Date(runAt).toLocaleDateString("en-US", {
+  const d = new Date(runAt);
+  const date = d.toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC",
   });
-  const time = new Date(runAt).toLocaleTimeString("en-US", {
+  const time = d.toLocaleTimeString("en-US", {
     hour: "2-digit", minute: "2-digit", timeZone: "UTC",
   }) + " UTC";
+  const safeTopic = htmlEsc(topic);
+  const safeModel = htmlEsc(model);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AI Briefing: ${topic}</title></head>
+<title>AI Briefing: ${safeTopic}</title></head>
 <body style="margin:0;padding:20px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
 <div style="max-width:680px;margin:0 auto">
   <div style="background:#04060a;border-radius:8px 8px 0 0;padding:22px 30px">
@@ -95,9 +126,9 @@ function buildEmailHtml(
   </div>
   <div style="background:#fff;padding:10px 30px 2px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
     <p style="margin:10px 0;font-size:13px;color:#64748b">
-      <strong style="color:#0f172a">${topic}</strong>
+      <strong style="color:#0f172a">${safeTopic}</strong>
       &nbsp;&middot;&nbsp;${date}&nbsp;&middot;&nbsp;${time}
-      &nbsp;&middot;&nbsp;<span style="color:#94a3b8">${model}</span>
+      &nbsp;&middot;&nbsp;<span style="color:#94a3b8">${safeModel}</span>
       &nbsp;&middot;&nbsp;${docCount} source${docCount === 1 ? "" : "s"}
     </p>
   </div>
@@ -327,7 +358,12 @@ export default {
         const close = async () => { try { await writer.close(); } catch {} };
 
         const timeout = setTimeout(() => {
-          void emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." }).finally(close);
+          // Best-effort error notification. close() must run regardless of whether
+          // the write drains (backpressure stall) — cap the wait at 2 s.
+          void Promise.race([
+            emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." }),
+            new Promise<void>((r) => setTimeout(r, 2_000)),
+          ]).finally(close);
         }, 28_000);
 
         try {
