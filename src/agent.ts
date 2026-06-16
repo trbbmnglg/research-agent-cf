@@ -384,22 +384,26 @@ function buildGraph(
     const context = docs
       .map(
         (d) =>
-          `- [${d.relevance}/10] [[${(d.tag ?? "Announced").toUpperCase()}]] ${d.title} | ${d.date} | ${d.url}\n` +
-          `  why-relevant: ${d.reason}\n  excerpt: ${d.content.slice(0, 400)}`,
+          `[[${(d.tag ?? "Announced").toUpperCase()}]] ${d.title}\n` +
+          `  date: ${d.date}\n` +
+          `  source_url: ${d.url}\n` +
+          `  relevance: ${d.relevance}/10 — ${d.reason}\n` +
+          `  excerpt: ${d.content.slice(0, 400)}`,
       )
-      .join("\n");
+      .join("\n\n");
     const system =
       "You write a concise, personalized AI-news briefing in markdown.\n" +
       "Rules:\n" +
       "- Do NOT use emoji anywhere — no emoji in headers, items, or body text.\n" +
       "- Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text.\n" +
       "- Within a group, keep the given order (most relevant first).\n" +
-      "- Each item is one list entry (- ) that STARTS with its substance token, copied verbatim " +
-      "from the input — exactly one of [[SHIPPED]] [[ANNOUNCED]] [[RESEARCH]] [[HYPE]] — " +
-      "then the headline and the source name and date (NO URL here). " +
-      "Do not reword the token or replace it with emoji.\n" +
-      "- On the next line (indented, 2 spaces), write the description and 'Why this matters:' line.\n" +
-      "- On the line after that (indented, 2 spaces), end with a reference link in this exact format: [→ source](url)\n" +
+      "- Each item follows this EXACT three-line structure:\n" +
+      "    - [[TAG]] Headline — Source Name, Date\n" +
+      "      Description. Why this matters to you: one sentence tied to reader role/stack.\n" +
+      "      [→ source](source_url)\n" +
+      "  Line 1: the [[TAG]] token then headline then source name and date. NO URL on this line.\n" +
+      "  Line 2: description and why-it-matters. NO URL on this line.\n" +
+      "  Line 3: the markdown link [→ source](source_url) — use the exact source_url from the input. NOTHING ELSE on this line.\n" +
       "- Strip hype and marketing; be plain and useful. Do NOT invent facts beyond the excerpts.\n" +
       "- Start with a one-sentence TL;DR, then the grouped items.";
     const user =
