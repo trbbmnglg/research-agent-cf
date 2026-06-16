@@ -115,13 +115,26 @@
       <summary><span class="ic ic-about"></span> About this app</summary>
       <div class="disclosure-body about-body">
         <p><b>Personalized AI News Agent</b> — a self-correcting research assistant
-          built to explore <b>agentic AI</b> patterns.</p>
+          that runs daily and <b>learns from its own history</b> to cover new ground
+          each run.</p>
 
         <p><b>How it works — the agentic loop</b><br />
           <code>plan → search → score → synthesize → reflect</code>. After drafting a
           briefing, the <b>reflect</b> node critiques its own coverage, lists what's
           missing, and loops back to run <i>targeted</i> searches — repeating until
           coverage is solid or it hits the <b>max research passes</b> cap.</p>
+
+        <p><b>Cross-run learning (the DB-powered upgrades)</b><br />
+          Every run is stored in <b>Cloudflare D1</b>. Before each new run the agent
+          reads its own history to become smarter:</p>
+        <ul class="about-list">
+          <li><b>Dynamic lookback window</b> — cron runs compute how many days have
+            passed since the last briefing on the same topic and set the search window
+            exactly. No stale re-coverage, no new-content gaps.</li>
+          <li><b>Gap carryover</b> — the reflect node records blind spots it found in
+            each draft. The next run's plan node reads these and folds them into its
+            initial queries, so the agent improves its search strategy across runs.</li>
+        </ul>
 
         <p><b>Substance tags</b></p>
         <div class="legend">
@@ -138,7 +151,7 @@
           <div class="cyber-tech tech-langchain"><span class="tic"></span><span class="tx"><b>LangChain.js</b><small>LLM orchestration layer</small></span></div>
           <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>Claude (Anthropic)</b><small>reasoning engine</small></span></div>
           <div class="cyber-tech tech-tavily"><span class="tic"></span><span class="tx"><b>Tavily</b><small>recency-aware news search</small></span></div>
-          <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + KV + Cron</small></span></div>
+          <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + D1 + KV + Cron</small></span></div>
         </div>
 
         <p class="muted"><i>The Matrix rain, neon UI, sound FX, and ♫ background music

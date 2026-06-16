@@ -91,8 +91,9 @@ export interface ResearchParams {
   maxIterations?: number;
   provider?: Provider;
   model?: string;
-  apiKey: string; // user-supplied LLM key (BYOK) — used in-memory, never stored
-  tavilyKey: string; // user-supplied Tavily key (BYOK)
+  apiKey: string;
+  tavilyKey: string;
+  priorGaps?: string[]; // blind spots from previous runs on this topic
 }
 
 // --------------------------------------------------------------------------- //
@@ -207,7 +208,7 @@ function makeLlm(provider: Provider, model: string, apiKey: string, maxTokens: n
   return new ChatOpenAI({ apiKey, model, temperature: 0, maxTokens });
 }
 
-function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey: string) {
+function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey: string, priorGaps: string[] = []) {
   // generous caps — adaptive/extended thinking tokens count against max_tokens
   const fastLlm = makeLlm(provider, model, apiKey, 2048);
   const writerLlm = makeLlm(provider, model, apiKey, 6000);
@@ -222,9 +223,12 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
         "a request, and the reader's profile, write exactly 3 focused search queries " +
         "for RECENT AI news that matter to this reader. Cover different angles; prefer " +
         "concrete events. Reply with ONLY a JSON array of 3 strings.";
+      const gapHint = priorGaps.length > 0
+        ? `\nBlind spots from previous runs on this topic (address at least one in your queries): ${JSON.stringify(priorGaps.slice(0, 5))}`
+        : "";
       user =
         `Topic: ${state.topic}\nRequest: ${state.question}\n` +
-        `Reader profile: ${JSON.stringify(state.profile)}\n` +
+        `Reader profile: ${JSON.stringify(state.profile)}${gapHint}\n` +
         "Return a JSON array of exactly 3 query strings.";
     } else {
       system =
@@ -405,7 +409,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
 export async function runResearch(params: ResearchParams) {
   const provider: Provider = params.provider === "openai" ? "openai" : "anthropic";
   const model = resolveModel(provider, params.model);
-  const app = buildGraph(provider, model, params.apiKey, params.tavilyKey);
+  const app = buildGraph(provider, model, params.apiKey, params.tavilyKey, params.priorGaps ?? []);
   const initial: State = {
     question: params.question,
     topic: params.topic,

@@ -8,7 +8,7 @@
 //  *                     → served as static files from /public (assets binding)
 
 import { runResearch, MODELS, type Provider } from "./agent";
-import { insertRun, getRun, getLatestRun, listRuns } from "./db";
+import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps } from "./db";
 
 // Default parameters for the daily cron run — tuned to the owner's profile.
 const CRON_TOPIC = "Agentic AI and LLM developments";
@@ -46,15 +46,44 @@ async function runAndStore(
   model: string,
   trigger: "cron" | "manual",
 ) {
+  // For cron runs, compute how many days have passed since the last run on this
+  // topic so the search window exactly covers new content (capped at 14 days).
+  let effectiveDays = days;
+  if (trigger === "cron") {
+    try {
+      const last = await getLatestRunForTopic(env.RESEARCH_DB, topic);
+      if (last) {
+        const elapsed = Math.ceil((Date.now() - new Date(last.run_at).getTime()) / 86_400_000);
+        effectiveDays = Math.min(14, Math.max(1, elapsed + 1));
+        console.log(`[runAndStore] dynamic lookback: ${effectiveDays} days (last run: ${last.run_at})`);
+      }
+    } catch (e) {
+      console.error("[runAndStore] getLatestRunForTopic failed, using default days:", e);
+    }
+  }
+
+  // Pull blind spots from previous runs on this topic so the plan node can
+  // address them in its first-pass queries (cross-run learning).
+  let priorGaps: string[] = [];
+  try {
+    priorGaps = await getRecentGaps(env.RESEARCH_DB, topic);
+    if (priorGaps.length > 0) {
+      console.log(`[runAndStore] ${priorGaps.length} prior gaps loaded for topic "${topic}"`);
+    }
+  } catch (e) {
+    console.error("[runAndStore] getRecentGaps failed, continuing without:", e);
+  }
+
   const result = await runResearch({
     question,
     topic,
-    days,
+    days: effectiveDays,
     maxIterations,
     provider: "anthropic" as Provider,
     model,
     apiKey: env.ANTHROPIC_API_KEY,
     tavilyKey: env.TAVILY_API_KEY,
+    priorGaps,
   });
 
   const runAt = new Date().toISOString();

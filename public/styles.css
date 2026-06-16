@@ -142,6 +142,8 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
 .pass b{ font-family:'Orbitron',sans-serif; color:#bff7ff; }
 .muted{ color:var(--ink-dim); }
 .legend{ line-height:2.2; }
+.about-list{ margin:.4rem 0 .4rem 1.2rem; padding:0; line-height:2; color:var(--ink); }
+.about-list li{ margin-bottom:.15rem; }
 
 /* header icons */
 .ic{ width:18px; height:18px; flex:0 0 18px; background-size:contain; background-repeat:no-repeat; background-position:center; filter:drop-shadow(0 0 4px var(--cy)); }

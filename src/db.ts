@@ -135,6 +135,53 @@ async function attachDetails(
 }
 
 // --------------------------------------------------------------------------- //
+// Read — cross-run intelligence (used by the agent to learn across runs)
+// --------------------------------------------------------------------------- //
+
+// Most recent run for a given topic — used to compute the dynamic lookback window.
+export async function getLatestRunForTopic(
+  db: D1Database,
+  topic: string,
+): Promise<{ run_at: string } | null> {
+  return db
+    .prepare(`SELECT run_at FROM runs WHERE topic LIKE ? ORDER BY run_at DESC LIMIT 1`)
+    .bind(`%${topic}%`)
+    .first<{ run_at: string }>();
+}
+
+// Unique gap strings from reflect_passes across recent runs on a topic.
+// The plan node passes these to the LLM so the next run fills known blind spots.
+export async function getRecentGaps(
+  db: D1Database,
+  topic: string,
+  limit = 10,
+): Promise<string[]> {
+  const rows = await db
+    .prepare(
+      `SELECT rp.gaps FROM reflect_passes rp
+       JOIN runs r ON rp.run_id = r.id
+       WHERE r.topic LIKE ?
+       ORDER BY r.run_at DESC, rp.iteration DESC
+       LIMIT ?`,
+    )
+    .bind(`%${topic}%`, limit)
+    .all<{ gaps: string }>();
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const row of rows.results) {
+    try {
+      const parsed = JSON.parse(row.gaps || "[]") as string[];
+      for (const gap of parsed) {
+        const g = typeof gap === "string" ? gap.trim() : "";
+        if (g && !seen.has(g)) { seen.add(g); result.push(g); }
+      }
+    } catch { /* ignore malformed */ }
+  }
+  return result.slice(0, 8);
+}
+
+// --------------------------------------------------------------------------- //
 // Read — list
 // --------------------------------------------------------------------------- //
 export async function listRuns(db: D1Database, filters: ListFilters): Promise<RunSummary[]> {
