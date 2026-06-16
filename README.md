@@ -1,6 +1,6 @@
 # Personalized AI News Research Agent — Cloudflare Edition
 
-An autonomous AI research agent that calls search tools to gather targeted AI news, scores every result against **your** profile ("why should *I* care?"), tags its substance, strips the hype, and writes a briefing — then **critiques its own draft and re-searches gaps** until coverage is solid. Learns from prior runs to cover new ground each time.
+An autonomous AI research agent that calls search tools to gather targeted AI news, scores every result against **your** profile ("why should *I* care?"), tags its substance, strips the hype, and writes a briefing — then **critiques its own draft and re-searches gaps** until coverage is solid. Learns from prior runs to cover new ground each time. Delivers the finished briefing to your **inbox via email** every morning.
 
 Runs **daily** via a Cloudflare cron trigger. Results are stored in **Cloudflare D1** and browsable in the UI.
 
@@ -10,7 +10,7 @@ Built edge-native: the agent runs as a **Cloudflare Worker** in TypeScript with 
 
 ## What makes it agentic
 
-The graph is **not** a fixed pipeline. The `researcher` node binds a `search_news` tool to Claude and lets the LLM decide what to search — it picks queries, calls the tool in parallel, reads results, and calls again if coverage looks thin. After drafting, the `reflect` node judges its own coverage, lists what's missing, and loops back for targeted re-searches, bounded by a hard pass cap.
+The graph is **not** a fixed pipeline. The `researcher` node binds a `search_news` tool to Claude and lets the LLM decide what to search — it picks queries, calls the tool in parallel, reads results, and calls again if coverage looks thin. After drafting, the `reflect` node judges its own coverage, lists what's missing, and loops back for targeted re-searches, bounded by a hard pass cap. Once coverage is confirmed, the finished briefing is emailed via Resend.
 
 ```
 researcher (tool-calling) → score → synthesize → reflect

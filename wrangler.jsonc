@@ -47,8 +47,8 @@
   // Not sensitive; API keys go via `wrangler secret put` instead.
   ,
   "vars": {
-    "NOTIFY_EMAIL": "your@email.com",         // recipient for daily briefing emails
-    "NOTIFY_FROM":  "briefings@yourdomain.com" // must be a verified Resend sender domain
+    "NOTIFY_EMAIL": "web.rbbjr@gmail.com",
+    "NOTIFY_FROM":  "briefings@robertbumanglagjr.com"
   }
   // Secrets (wrangler secret put, or .dev.vars locally):
   //   ANTHROPIC_API_KEY   – Anthropic key
