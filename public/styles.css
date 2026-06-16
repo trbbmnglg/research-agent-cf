@@ -144,6 +144,11 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
 .legend{ line-height:2.2; }
 .about-list{ margin:.4rem 0 .4rem 1.2rem; padding:0; line-height:2; color:var(--ink); }
 .about-list li{ margin-bottom:.15rem; }
+.btn-xs{ padding:2px 8px; font-size:.72rem; }
+.graph-container{ margin:.6rem 0 1rem; padding:14px; background:rgba(0,240,255,.04); border:1px solid rgba(0,240,255,.18);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px); overflow-x:auto; }
+.graph-container svg{ max-width:100%; height:auto; display:block; margin:0 auto; }
+.graph-loading{ color:var(--ink-dim); font-family:'Share Tech Mono',monospace; font-size:.85rem; padding:8px 0; }
 
 /* header icons */
 .ic{ width:18px; height:18px; flex:0 0 18px; background-size:contain; background-repeat:no-repeat; background-position:center; filter:drop-shadow(0 0 4px var(--cy)); }

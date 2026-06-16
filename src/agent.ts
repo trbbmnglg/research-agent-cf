@@ -440,6 +440,36 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
 }
 
 // --------------------------------------------------------------------------- //
+// Graph diagram — used by /api/graph to show the agentic loop in the UI.
+// --------------------------------------------------------------------------- //
+export function getGraphDiagram(): string {
+  try {
+    // Build with placeholder keys — we only need the graph structure, never invoke.
+    const compiled = buildGraph("anthropic", "claude-haiku-4-5-20251001", "sk-ant-placeholder", "placeholder");
+    return compiled.getGraph().drawMermaid();
+  } catch {
+    // Fallback if the build or drawMermaid throws
+    return [
+      "graph TD",
+      "  __start__([Start]):::first",
+      "  researcher(researcher)",
+      "  score(score)",
+      "  synthesize(synthesize)",
+      "  reflect(reflect)",
+      "  __end__([End]):::last",
+      "  __start__ --> researcher",
+      "  researcher --> score",
+      "  score --> synthesize",
+      "  synthesize --> reflect",
+      "  reflect -.-> researcher",
+      "  reflect -.-> __end__",
+      "  classDef first fill-opacity:0",
+      "  classDef last fill:#1a0533",
+    ].join("\n");
+  }
+}
+
+// --------------------------------------------------------------------------- //
 // Public entry point
 // --------------------------------------------------------------------------- //
 export async function runResearch(params: ResearchParams) {

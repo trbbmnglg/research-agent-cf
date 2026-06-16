@@ -482,3 +482,57 @@ function render(result) {
     `<span class="ic ic-reasoning"></span> Agent reasoning — ${history.length} pass(es)`;
   reasoningEl.hidden = false;
 }
+
+// =========================================================================== //
+// Agent graph (Mermaid — loaded on demand)
+// =========================================================================== //
+let graphLoaded = false;
+
+$("toggleGraph").addEventListener("click", async () => {
+  const container = $("graphContainer");
+  const btn = $("toggleGraph");
+  if (!container.hidden) {
+    container.hidden = true;
+    btn.textContent = "[ SHOW GRAPH ]";
+    return;
+  }
+  container.hidden = false;
+  btn.textContent = "[ HIDE GRAPH ]";
+  if (graphLoaded) return;
+
+  container.innerHTML = `<p class="graph-loading"><span class="spinner"></span> Rendering graph…</p>`;
+  try {
+    const [{ default: mermaid }, res] = await Promise.all([
+      import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"),
+      fetch("/api/graph"),
+    ]);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { mermaid: code } = await res.json();
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      themeVariables: {
+        primaryColor: "#0d1f33",
+        primaryTextColor: "#00f0ff",
+        primaryBorderColor: "#00f0ff",
+        lineColor: "#00f0ff",
+        secondaryColor: "#04070a",
+        tertiaryColor: "#04070a",
+        background: "#04070a",
+        mainBkg: "#0d1f33",
+        nodeBorder: "#00f0ff",
+        clusterBkg: "#04070a",
+        titleColor: "#00f0ff",
+        edgeLabelBackground: "#04070a",
+        fontFamily: "'Share Tech Mono', monospace",
+      },
+    });
+
+    const { svg } = await mermaid.render("agent-graph-svg", code);
+    container.innerHTML = svg;
+    graphLoaded = true;
+  } catch (e) {
+    container.innerHTML = `<p class="graph-loading">⚠ ${esc(e?.message || e)}</p>`;
+  }
+});

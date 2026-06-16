@@ -7,7 +7,7 @@
 //  GET  /api/models      → model list for the UI picker
 //  *                     → served as static files from /public (assets binding)
 
-import { runResearch, MODELS, type Provider } from "./agent";
+import { runResearch, getGraphDiagram, MODELS, type Provider } from "./agent";
 import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps } from "./db";
 
 // Default parameters for the daily cron run — tuned to the owner's profile.
@@ -26,6 +26,8 @@ interface Env {
   ANTHROPIC_API_KEY: string;
   TAVILY_API_KEY: string;
   MANUAL_PASSWORD: string;
+  LANGCHAIN_API_KEY?: string;   // optional — enables LangSmith tracing
+  LANGCHAIN_PROJECT?: string;   // optional — defaults to "research-agent-cf"
 }
 
 interface RunBody {
@@ -60,6 +62,14 @@ async function runAndStore(
     } catch (e) {
       console.error("[runAndStore] getLatestRunForTopic failed, using default days:", e);
     }
+  }
+
+  // Wire LangSmith tracing when the secret is present.
+  // process.env is a writable shim in Cloudflare Workers (nodejs_compat).
+  if (env.LANGCHAIN_API_KEY) {
+    process.env.LANGCHAIN_TRACING_V2 = "true";
+    process.env.LANGCHAIN_API_KEY = env.LANGCHAIN_API_KEY;
+    process.env.LANGCHAIN_PROJECT = env.LANGCHAIN_PROJECT ?? "research-agent-cf";
   }
 
   // Pull blind spots from previous runs on this topic so the plan node can
@@ -120,6 +130,11 @@ export default {
     // ── /api/models ──────────────────────────────────────────────────────── //
     if (url.pathname === "/api/models") {
       return Response.json(MODELS);
+    }
+
+    // ── /api/graph ───────────────────────────────────────────────────────── //
+    if (url.pathname === "/api/graph") {
+      return Response.json({ mermaid: getGraphDiagram() });
     }
 
     // ── /api/latest ──────────────────────────────────────────────────────── //
