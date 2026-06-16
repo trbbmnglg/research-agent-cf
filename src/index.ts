@@ -7,7 +7,7 @@
 //  GET  /api/models      → model list for the UI picker
 //  *                     → served as static files from /public (assets binding)
 
-import { runResearch, getGraphDiagram, MODELS, type Provider } from "./agent";
+import { runResearch, getGraphDiagram, MODELS, type Provider, type ProgressEvent } from "./agent";
 import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps } from "./db";
 
 // Default parameters for the daily cron run — tuned to the owner's profile.
@@ -47,6 +47,7 @@ async function runAndStore(
   maxIterations: number,
   model: string,
   trigger: "cron" | "manual",
+  onProgress?: (event: ProgressEvent) => void,
 ) {
   // For cron runs, compute how many days have passed since the last run on this
   // topic so the search window exactly covers new content (capped at 14 days).
@@ -94,6 +95,7 @@ async function runAndStore(
     apiKey: env.ANTHROPIC_API_KEY,
     tavilyKey: env.TAVILY_API_KEY,
     priorGaps,
+    onProgress,
   });
 
   const runAt = new Date().toISOString();
@@ -124,7 +126,7 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // ── /api/models ──────────────────────────────────────────────────────── //
@@ -184,40 +186,67 @@ export default {
       }
     }
 
-    // ── /api/run (manual trigger) ─────────────────────────────────────────  //
+    // ── /api/run (manual trigger — streams SSE progress events) ──────────  //
     if (url.pathname === "/api/run") {
       if (request.method !== "POST") {
         return Response.json({ error: "Use POST" }, { status: 405 });
       }
-      try {
-        const body = (await request.json()) as RunBody;
-        if (!body.password || body.password !== env.MANUAL_PASSWORD) {
-          return Response.json({ error: "Invalid access key." }, { status: 401 });
-        }
-        const topic    = (body.topic    || CRON_TOPIC).trim();
-        const question = (body.question || body.topic || CRON_QUESTION).trim();
 
-        // Race against 25 s so we return a clean error before CF kills at 30 s.
-        const stored = await Promise.race([
-          runAndStore(
-            env, topic, question,
-            clampInt(body.days,           1, 30, CRON_DAYS),
-            clampInt(body.maxIterations,  1,  5, CRON_MAX_ITERATIONS),
-            resolveAnthropicModel(body.model),
-            "manual",
-          ),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Research timed out — try fewer passes or a shorter look-back.")),
-              25_000,
-            ),
-          ),
-        ]);
-        return Response.json(stored);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        return Response.json({ error: message }, { status: 500 });
+      let body: RunBody;
+      try {
+        body = (await request.json()) as RunBody;
+      } catch {
+        return Response.json({ error: "Invalid JSON body." }, { status: 400 });
       }
+      if (!body.password || body.password !== env.MANUAL_PASSWORD) {
+        return Response.json({ error: "Invalid access key." }, { status: 401 });
+      }
+
+      const topic    = (body.topic    || CRON_TOPIC).trim();
+      const question = (body.question || body.topic || CRON_QUESTION).trim();
+      const days     = clampInt(body.days,           1, 30, CRON_DAYS);
+      const maxIter  = clampInt(body.maxIterations,  1,  5, CRON_MAX_ITERATIONS);
+      const model    = resolveAnthropicModel(body.model);
+
+      const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+      const writer  = writable.getWriter();
+      const encoder = new TextEncoder();
+
+      // Fire-and-forget: stream progress events then the final result.
+      // ctx.waitUntil keeps the Worker alive until the stream closes.
+      ctx.waitUntil((async () => {
+        const emit = (data: object) => {
+          try { writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch {}
+        };
+        const close = async () => { try { await writer.close(); } catch {} };
+
+        const timeout = setTimeout(() => {
+          emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." });
+          void close();
+        }, 25_000);
+
+        try {
+          const stored = await runAndStore(
+            env, topic, question, days, maxIter, model, "manual",
+            (event) => emit(event),
+          );
+          clearTimeout(timeout);
+          emit({ type: "result", ...stored });
+        } catch (e) {
+          clearTimeout(timeout);
+          emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
+        } finally {
+          await close();
+        }
+      })());
+
+      return new Response(readable, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
     }
 
     return env.ASSETS.fetch(request);

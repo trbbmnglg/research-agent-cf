@@ -91,6 +91,16 @@ export interface ReflectRecord {
   decision: string;
 }
 
+export type ProgressEvent =
+  | { type: "researcher_start"; iteration: number }
+  | { type: "tool_call"; query: string }
+  | { type: "tool_result"; query: string; found: number }
+  | { type: "score_start"; total: number }
+  | { type: "score_done"; kept: number }
+  | { type: "synthesize_start" }
+  | { type: "reflect_start"; iteration: number }
+  | { type: "reflect_done"; sufficient: boolean; gaps: string[] };
+
 export interface ResearchParams {
   question: string;
   topic: string;
@@ -100,7 +110,8 @@ export interface ResearchParams {
   model?: string;
   apiKey: string;
   tavilyKey: string;
-  priorGaps?: string[]; // blind spots from previous runs on this topic
+  priorGaps?: string[];
+  onProgress?: (event: ProgressEvent) => void;
 }
 
 // --------------------------------------------------------------------------- //
@@ -214,7 +225,14 @@ function makeLlm(provider: Provider, model: string, apiKey: string, maxTokens: n
   return new ChatOpenAI({ apiKey, model, temperature: 0, maxTokens });
 }
 
-function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey: string, priorGaps: string[] = []) {
+function buildGraph(
+  provider: Provider,
+  model: string,
+  apiKey: string,
+  tavilyKey: string,
+  priorGaps: string[] = [],
+  onProgress?: (event: ProgressEvent) => void,
+) {
   // generous caps — adaptive/extended thinking tokens count against max_tokens
   const fastLlm = makeLlm(provider, model, apiKey, 2048);
   const writerLlm = makeLlm(provider, model, apiKey, 6000);
@@ -222,12 +240,14 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
   // 1. researcher — tool-calling node: Claude decides what to search and when to stop.
   //    Replaces the old hardcoded plan → search pipeline.
   async function researcher(state: State): Promise<Partial<State>> {
+    onProgress?.({ type: "researcher_start", iteration: state.iteration });
     const seenUrls = new Set(state.docs.map((d) => d.url));
     const newDocs: Doc[] = [];
 
     // The search tool — Claude calls this; we execute via Tavily, dedupe by URL.
     const searchTool = tool(
       async ({ query }: { query: string }): Promise<string> => {
+        onProgress?.({ type: "tool_call", query });
         const results = await tavilySearch(tavilyKey, query, state.days);
         const fresh: Doc[] = [];
         for (const r of results) {
@@ -241,6 +261,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
           });
         }
         newDocs.push(...fresh);
+        onProgress?.({ type: "tool_result", query, found: fresh.length });
         return fresh.length > 0
           ? `Found ${fresh.length} articles: ${fresh.map((d) => `"${d.title}" (${d.date})`).join(", ")}`
           : "No new articles found for this query.";
@@ -315,6 +336,8 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
 
   // 3. score — rate each NOT-yet-scored doc in parallel; drop the weak ones.
   async function score(state: State): Promise<Partial<State>> {
+    const unscored = state.docs.filter((doc) => doc.relevance === undefined);
+    onProgress?.({ type: "score_start", total: unscored.length });
     const system =
       "You score one AI-news item for a specific reader and tag its substance.\n" +
       "relevance: 0-10 — how much THIS reader should care, given their role, stack, " +
@@ -326,7 +349,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     const docs = state.docs;
     await Promise.all(
       docs
-        .filter((doc) => doc.relevance === undefined)
+        .filter((doc) => doc.relevance === undefined)  // already filtered above for count
         .map(async (doc) => {
           const user =
             `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
@@ -347,11 +370,13 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     );
     const kept = docs.filter((d) => (d.relevance ?? 0) >= RELEVANCE_FLOOR);
     kept.sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+    onProgress?.({ type: "score_done", kept: kept.length });
     return { docs: kept };
   }
 
   // 4. synthesize — draft the briefing from kept docs (already ranked).
   async function synthesize(state: State): Promise<Partial<State>> {
+    onProgress?.({ type: "synthesize_start" });
     const docs = state.docs;
     if (docs.length === 0) {
       return { answer: "_No relevant items cleared the bar in this window. Try widening **look back (days)** or broadening the topic._" };
@@ -394,6 +419,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
   // 5. reflect — THE agentic node: critique the draft, decide whether to loop.
   async function reflect(state: State): Promise<Partial<State>> {
     const iteration = state.iteration + 1;
+    onProgress?.({ type: "reflect_start", iteration });
     const system =
       "You are a strict editor judging whether an AI-news briefing fully answers the " +
       "reader's request given their profile. Identify concrete MISSING angles, " +
@@ -417,6 +443,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     }
     const capped = iteration >= state.maxIterations;
     const done = sufficient || capped;
+    onProgress?.({ type: "reflect_done", sufficient: done ? true : sufficient, gaps });
     const record: ReflectRecord = {
       iteration, sufficient, gaps, reasoning,
       decision: sufficient ? "stop — coverage sufficient" : capped ? "stop — hit max passes" : "loop — re-plan on gaps",
@@ -476,7 +503,7 @@ export function getGraphDiagram(): string {
 export async function runResearch(params: ResearchParams) {
   const provider: Provider = params.provider === "openai" ? "openai" : "anthropic";
   const model = resolveModel(provider, params.model);
-  const app = buildGraph(provider, model, params.apiKey, params.tavilyKey, params.priorGaps ?? []);
+  const app = buildGraph(provider, model, params.apiKey, params.tavilyKey, params.priorGaps ?? [], params.onProgress);
   const initial: State = {
     question: params.question,
     topic: params.topic,

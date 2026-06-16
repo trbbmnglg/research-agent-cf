@@ -406,6 +406,35 @@ loadLatest();
 // =========================================================================== //
 // Manual run — password required
 // =========================================================================== //
+function statusForEvent(ev) {
+  switch (ev.type) {
+    case "researcher_start":
+      return ev.iteration === 0
+        ? "Agent deciding what to search…"
+        : `Coverage thin — re-searching (pass ${ev.iteration + 1})…`;
+    case "tool_call":
+      return `Searching: "${ev.query}"`;
+    case "tool_result":
+      return ev.found > 0
+        ? `Found ${ev.found} article${ev.found === 1 ? "" : "s"} — "${ev.query}"`
+        : `No new results — "${ev.query}"`;
+    case "score_start":
+      return `Scoring ${ev.total} article${ev.total === 1 ? "" : "s"} against your profile…`;
+    case "score_done":
+      return `${ev.kept} article${ev.kept === 1 ? "" : "s"} cleared the relevance bar`;
+    case "synthesize_start":
+      return "Synthesizing briefing…";
+    case "reflect_start":
+      return `Reviewing coverage (reflect pass ${ev.iteration})…`;
+    case "reflect_done":
+      return ev.sufficient
+        ? "Coverage confirmed — finalizing…"
+        : `Gaps found: ${ev.gaps.slice(0, 2).map((g) => `"${g}"`).join(", ")}${ev.gaps.length > 2 ? "…" : ""}`;
+    default:
+      return null;
+  }
+}
+
 async function runManual(topic, question) {
   if (busy) return;
   const password = passwordEl.value.trim();
@@ -415,8 +444,9 @@ async function runManual(topic, question) {
     return;
   }
   setBusy(true);
-  setStatus(`Researching "${topic}" — plan → search → score → synthesize → reflect…`, true);
+  setStatus(`Starting research on "${topic}"…`, true);
   briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
+
   try {
     const res = await fetch("/api/run", {
       method: "POST",
@@ -429,12 +459,46 @@ async function runManual(topic, question) {
         password,
       }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    renderWithMeta(data);
-    statusEl.hidden = true;
-    runPanel.hidden = true;
-    toggleBtn.textContent = "[ RUN NOW ]";
+
+    // Auth / bad-request errors return JSON before the stream starts
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Request failed (${res.status})`);
+    }
+
+    // Read the SSE stream
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Split on SSE message boundary (\n\n)
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data: ")) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (ev.type === "result") {
+          renderWithMeta(ev);
+          statusEl.hidden = true;
+          runPanel.hidden = true;
+          toggleBtn.textContent = "[ RUN NOW ]";
+        } else if (ev.type === "error") {
+          setStatus("⚠ " + esc(ev.message || "Unknown error"), false);
+        } else {
+          const msg = statusForEvent(ev);
+          if (msg) setStatus(msg, true);
+        }
+      }
+    }
   } catch (e) {
     setStatus("⚠ " + (e?.message || e), false);
   } finally {
