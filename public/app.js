@@ -332,8 +332,11 @@ async function loadHistory() {
   if (histFilters.from)  params.set("from",  histFilters.from);
   if (histFilters.to)    params.set("to",    histFilters.to);
   try {
-    const res = await fetch(`/api/runs?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(`/api/runs?${params}`, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     const runs = data.runs || [];
     if (runs.length === 0) {
@@ -368,8 +371,11 @@ async function loadRunById(id) {
   historyPanel.hidden = true;
   $("toggleHistoryPanel").textContent = "[ HISTORY ]";
   try {
-    const res = await fetch(`/api/runs/${id}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const res = await fetch(`/api/runs/${id}`, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.error || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     renderWithMeta(data);
     statusEl.hidden = true;

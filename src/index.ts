@@ -95,32 +95,49 @@ export default {
 
     // ── /api/latest ──────────────────────────────────────────────────────── //
     if (url.pathname === "/api/latest" && request.method === "GET") {
-      // Try KV pointer first (avoids a full table scan).
-      const latestId = await env.RESEARCH_KV.get("latest_id");
-      const run = latestId
-        ? await getRun(env.RESEARCH_DB, Number(latestId))
-        : await getLatestRun(env.RESEARCH_DB);
-      if (!run) return Response.json({ notFound: true }, { status: 404 });
-      return Response.json(run, { headers: { "Cache-Control": "no-store" } });
+      try {
+        const latestId = await env.RESEARCH_KV.get("latest_id");
+        const run = latestId
+          ? await getRun(env.RESEARCH_DB, Number(latestId))
+          : await getLatestRun(env.RESEARCH_DB);
+        if (!run) return Response.json({ notFound: true }, { status: 404 });
+        return Response.json(run, { headers: { "Cache-Control": "no-store" } });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("[/api/latest]", message);
+        return Response.json({ error: message }, { status: 500 });
+      }
     }
 
     // ── /api/runs (list) ─────────────────────────────────────────────────── //
     if (url.pathname === "/api/runs" && request.method === "GET") {
-      const topic = url.searchParams.get("topic") || undefined;
-      const from  = url.searchParams.get("from")  || undefined;
-      const to    = url.searchParams.get("to")    || undefined;
-      const limit  = clampInt(url.searchParams.get("limit"),  1, 100, HISTORY_PAGE_SIZE);
-      const offset = clampInt(url.searchParams.get("offset"), 0, 1e9, 0);
-      const runs = await listRuns(env.RESEARCH_DB, { topic, from, to, limit, offset });
-      return Response.json({ runs, limit, offset });
+      try {
+        const topic = url.searchParams.get("topic") || undefined;
+        const from  = url.searchParams.get("from")  || undefined;
+        const to    = url.searchParams.get("to")    || undefined;
+        const limit  = clampInt(url.searchParams.get("limit"),  1, 100, HISTORY_PAGE_SIZE);
+        const offset = clampInt(url.searchParams.get("offset"), 0, 1e9, 0);
+        const runs = await listRuns(env.RESEARCH_DB, { topic, from, to, limit, offset });
+        return Response.json({ runs, limit, offset });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("[/api/runs]", message);
+        return Response.json({ error: message }, { status: 500 });
+      }
     }
 
     // ── /api/runs/:id ─────────────────────────────────────────────────────  //
     const runIdMatch = url.pathname.match(/^\/api\/runs\/(\d+)$/);
     if (runIdMatch && request.method === "GET") {
-      const run = await getRun(env.RESEARCH_DB, Number(runIdMatch[1]));
-      if (!run) return Response.json({ error: "Not found" }, { status: 404 });
-      return Response.json(run);
+      try {
+        const run = await getRun(env.RESEARCH_DB, Number(runIdMatch[1]));
+        if (!run) return Response.json({ error: "Not found" }, { status: 404 });
+        return Response.json(run);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("[/api/runs/:id]", message);
+        return Response.json({ error: message }, { status: 500 });
+      }
     }
 
     // ── /api/run (manual trigger) ─────────────────────────────────────────  //
