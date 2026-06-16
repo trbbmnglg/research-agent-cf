@@ -44,7 +44,7 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
 (function matrixTitle() {
   const target = "◢◤ AI NEWS AGENT ◢◤";
   const glyphs = "アイウエオカキクケコサシスセソタチツテト0123456789<>/|=+*#";
-  const HOLD = 16; // frames to hold the fully-decoded title before scrambling again
+  const HOLD = 16;
   let i = 0;
   setInterval(() => {
     const reveal = Math.min(i, target.length);
@@ -133,7 +133,6 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
     if (!t) lastHover = null;
   }, true);
 
-  // generative ambient track
   let music = null;
   const MVOL = 0.13;
   function buildMusic() {
@@ -193,52 +192,118 @@ const tagify = (text) =>
   );
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+function timeAgo(iso) {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+// Strip any emoji the LLM smuggles in despite the prompt instruction.
+// Uses Unicode property escapes (supported in all modern V8 environments).
+function stripEmoji(text) {
+  return text
+    .replace(/\p{Emoji_Presentation}/gu, "")
+    .replace(/\p{Extended_Pictographic}/gu, "")
+    .replace(/ {2,}/g, " ");
+}
+
 // =========================================================================== //
-// Controls + research
+// DOM refs + controls
 // =========================================================================== //
 const $ = (id) => document.getElementById(id);
-const daysEl = $("days"), passesEl = $("passes");
-const providerEl = $("provider"), modelEl = $("model");
-const apiKeyEl = $("apiKey"), tavilyKeyEl = $("tavilyKey");
+const daysEl = $("days"), passesEl = $("passes"), modelEl = $("model");
+const passwordEl = $("password");
 const briefingEl = $("briefing"), statusEl = $("status");
 const sourcesEl = $("sources"), sourcesBody = $("sourcesBody");
 const reasoningEl = $("reasoning"), reasoningBody = $("reasoningBody");
+const lastRunLabel = $("lastRunLabel");
+const runPanel = $("runPanel");
+const toggleBtn = $("toggleRunPanel");
+const historyPanel = $("historyPanel");
+const historyList = $("historyList");
+const historyPagination = $("historyPagination");
 let busy = false;
+let pendingTopic = "", pendingQuestion = "";
+
+// History state
+const PAGE_SIZE = 20;
+let histPage = 1;
+let histFilters = { topic: "", from: "", to: "" };
 
 daysEl.addEventListener("input", () => ($("daysVal").textContent = daysEl.value));
 passesEl.addEventListener("input", () => ($("passVal").textContent = passesEl.value));
 
-// Provider/model pickers — populated from /api/models (single source of truth).
-let MODELS = {
-  anthropic: [{ id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" }],
-  openai: [{ id: "gpt-4o-mini", label: "GPT-4o mini" }],
-};
+// Model picker — Anthropic only (server uses ANTHROPIC_API_KEY).
+let MODELS = { anthropic: [{ id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" }] };
 function populateModels() {
-  const list = MODELS[providerEl.value] || [];
-  modelEl.innerHTML = list.map((m) => `<option value="${m.id}">${m.label}</option>`).join("");
+  modelEl.innerHTML = MODELS.anthropic.map((m) => `<option value="${m.id}">${m.label}</option>`).join("");
 }
-function updateKeyLabel() {
-  const openai = providerEl.value === "openai";
-  $("llmKeyText").textContent = openai ? "OpenAI API key" : "Anthropic API key";
-  apiKeyEl.placeholder = openai ? "sk-..." : "sk-ant-...";
-}
-providerEl.addEventListener("change", () => { populateModels(); updateKeyLabel(); });
 fetch("/api/models")
   .then((r) => r.json())
   .then((data) => { if (data && data.anthropic) MODELS = data; populateModels(); })
   .catch(() => populateModels());
 populateModels();
-updateKeyLabel();
 
-document.querySelectorAll(".preset").forEach((b) =>
-  b.addEventListener("click", () => runResearch(b.dataset.topic, b.dataset.question)),
-);
-$("research").addEventListener("click", () => {
-  const q = $("freeform").value.trim();
-  if (!q) { setStatus("Type a question above, or click a quick topic.", false); return; }
-  runResearch(q, q);
+// =========================================================================== //
+// Panel toggles
+// =========================================================================== //
+toggleBtn.addEventListener("click", () => {
+  const willShow = runPanel.hidden;
+  runPanel.hidden = !willShow;
+  toggleBtn.textContent = willShow ? "[ CANCEL ]" : "[ RUN NOW ]";
+  if (willShow) { historyPanel.hidden = true; $("toggleHistoryPanel").textContent = "[ HISTORY ]"; passwordEl.focus(); }
 });
 
+$("toggleHistoryPanel").addEventListener("click", () => {
+  const willShow = historyPanel.hidden;
+  historyPanel.hidden = !willShow;
+  $("toggleHistoryPanel").textContent = willShow ? "[ CLOSE ]" : "[ HISTORY ]";
+  if (willShow) { runPanel.hidden = true; toggleBtn.textContent = "[ RUN NOW ]"; loadHistory(); }
+});
+
+// History filters
+$("applyFilter").addEventListener("click", () => {
+  histFilters = {
+    topic: $("filterTopic").value.trim(),
+    from:  $("filterFrom").value,
+    to:    $("filterTo").value,
+  };
+  histPage = 1;
+  loadHistory();
+});
+$("histPrev").addEventListener("click", () => { if (histPage > 1) { histPage--; loadHistory(); } });
+$("histNext").addEventListener("click", () => { histPage++; loadHistory(); });
+
+// =========================================================================== //
+// Presets — fill topic field; auto-run if password is already entered
+// =========================================================================== //
+document.querySelectorAll(".preset").forEach((b) =>
+  b.addEventListener("click", () => {
+    pendingTopic = b.dataset.topic;
+    pendingQuestion = b.dataset.question;
+    $("freeform").value = b.dataset.question;
+    if (passwordEl.value.trim()) {
+      runManual(b.dataset.topic, b.dataset.question);
+    } else {
+      passwordEl.focus();
+    }
+  })
+);
+
+$("research").addEventListener("click", () => {
+  const q = $("freeform").value.trim();
+  const topic = pendingTopic || q;
+  const question = pendingQuestion || q;
+  pendingTopic = pendingQuestion = "";
+  if (!q) { setStatus("Type a question above, or click a quick topic.", false); return; }
+  runManual(topic, question);
+});
+
+// =========================================================================== //
+// Helpers
+// =========================================================================== //
 function setStatus(msg, spinning) {
   statusEl.hidden = false;
   statusEl.classList.toggle("err", msg.startsWith("⚠"));
@@ -250,44 +315,120 @@ function setBusy(state) {
   document.querySelectorAll(".btn").forEach((b) => (b.disabled = state));
 }
 
-async function runResearch(topic, question) {
+// =========================================================================== //
+// History
+// =========================================================================== //
+const TRIGGER_BADGE = {
+  cron:   `<span class="hist-badge badge-cron">CRON</span>`,
+  manual: `<span class="hist-badge badge-manual">MANUAL</span>`,
+};
+
+async function loadHistory() {
+  historyList.innerHTML = `<div class="hist-loading"><span class="spinner"></span> Loading history…</div>`;
+  historyPagination.hidden = true;
+  const offset = (histPage - 1) * PAGE_SIZE;
+  const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
+  if (histFilters.topic) params.set("topic", histFilters.topic);
+  if (histFilters.from)  params.set("from",  histFilters.from);
+  if (histFilters.to)    params.set("to",    histFilters.to);
+  try {
+    const res = await fetch(`/api/runs?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const runs = data.runs || [];
+    if (runs.length === 0) {
+      historyList.innerHTML = `<p class="hist-empty">No runs found.</p>`;
+      return;
+    }
+    historyList.innerHTML = runs.map((r) => `
+      <div class="history-row" data-id="${r.id}">
+        <div class="hist-meta">
+          <span class="hist-date">${new Date(r.run_at).toLocaleString()}</span>
+          ${TRIGGER_BADGE[r.trigger] || ""}
+        </div>
+        <div class="hist-topic">${esc(r.topic)}</div>
+        <div class="hist-stats">${r.doc_count} sources · ${esc(r.model)}</div>
+      </div>
+    `).join("");
+    historyList.querySelectorAll(".history-row").forEach((row) =>
+      row.addEventListener("click", () => loadRunById(Number(row.dataset.id)))
+    );
+    historyPagination.hidden = false;
+    $("histPage").textContent = `page ${histPage}`;
+    $("histPrev").disabled = histPage <= 1;
+    $("histNext").disabled = runs.length < PAGE_SIZE;
+  } catch (e) {
+    historyList.innerHTML = `<p class="hist-empty">⚠ ${esc(e?.message || e)}</p>`;
+  }
+}
+
+async function loadRunById(id) {
+  setStatus(`Loading run #${id}…`, true);
+  briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
+  historyPanel.hidden = true;
+  $("toggleHistoryPanel").textContent = "[ HISTORY ]";
+  try {
+    const res = await fetch(`/api/runs/${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderWithMeta(data);
+    statusEl.hidden = true;
+  } catch (e) {
+    setStatus("⚠ " + (e?.message || e), false);
+  }
+}
+
+// =========================================================================== //
+// Auto-load latest briefing on page load
+// =========================================================================== //
+async function loadLatest() {
+  try {
+    const res = await fetch("/api/latest");
+    if (res.status === 404) {
+      lastRunLabel.textContent = "// NO BRIEFING YET — CLICK RUN NOW TO FETCH THE FIRST ONE";
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderWithMeta(data);
+  } catch {
+    lastRunLabel.textContent = "// COULD NOT LOAD LATEST BRIEFING";
+  }
+}
+loadLatest();
+
+// =========================================================================== //
+// Manual run — password required
+// =========================================================================== //
+async function runManual(topic, question) {
   if (busy) return;
-  const apiKey = apiKeyEl.value.trim();
-  const tavilyKey = tavilyKeyEl.value.trim();
-  if (!apiKey || !tavilyKey) {
-    setStatus(`⚠ Enter your ${providerEl.value === "openai" ? "OpenAI" : "Anthropic"} API key and your Tavily API key above.`, false);
-    return;
-  }
-  // catch the common "pasted the other provider's key" mistake before calling out
-  if (providerEl.value === "anthropic" && apiKey.startsWith("sk-") && !apiKey.startsWith("sk-ant-")) {
-    setStatus("⚠ That looks like an OpenAI key. Switch the engine to OpenAI, or paste your Anthropic key (it starts with sk-ant-).", false);
-    return;
-  }
-  if (providerEl.value === "openai" && apiKey.startsWith("sk-ant-")) {
-    setStatus("⚠ That looks like an Anthropic key. Switch the engine to Claude, or paste your OpenAI key.", false);
+  const password = passwordEl.value.trim();
+  if (!password) {
+    setStatus("⚠ Enter your access key above.", false);
+    passwordEl.focus();
     return;
   }
   setBusy(true);
-  setStatus(`Researching “${topic}” — plan → search → score → synthesize → reflect…`, true);
+  setStatus(`Researching "${topic}" — plan → search → score → synthesize → reflect…`, true);
   briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
   try {
-    const res = await fetch("/api/research", {
+    const res = await fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic, question,
         days: Number(daysEl.value),
         maxIterations: Number(passesEl.value),
-        provider: providerEl.value,
         model: modelEl.value,
-        apiKey,
-        tavilyKey,
+        password,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-    render(data);
+    renderWithMeta(data);
     statusEl.hidden = true;
+    runPanel.hidden = true;
+    toggleBtn.textContent = "[ RUN NOW ]";
   } catch (e) {
     setStatus("⚠ " + (e?.message || e), false);
   } finally {
@@ -295,12 +436,21 @@ async function runResearch(topic, question) {
   }
 }
 
+// =========================================================================== //
+// Render
+// =========================================================================== //
+function renderWithMeta(result) {
+  if (result.runAt && result.topic) {
+    lastRunLabel.textContent =
+      `// LAST BRIEFING: ${result.topic.toUpperCase()} — ${timeAgo(result.runAt)}`;
+  }
+  render(result);
+}
+
 function render(result) {
-  // briefing (markdown -> badges -> HTML)
-  briefingEl.innerHTML = marked.parse(tagify(result.answer || "_No briefing returned._"));
+  briefingEl.innerHTML = marked.parse(tagify(stripEmoji(result.answer || "_No briefing returned._")));
   briefingEl.hidden = false;
 
-  // sources & scores
   const docs = result.docs || [];
   sourcesBody.innerHTML = docs.length
     ? docs.map((d) =>
@@ -313,7 +463,6 @@ function render(result) {
     `<span class="ic ic-sources"></span> Sources &amp; scores — ${docs.length} kept`;
   sourcesEl.hidden = false;
 
-  // agent reasoning
   const history = result.history || [];
   reasoningBody.innerHTML = history.length
     ? history.map((r) =>

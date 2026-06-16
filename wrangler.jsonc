@@ -19,7 +19,32 @@
   },
   "observability": {
     "enabled": true
-  }
-  // Secrets (set with `wrangler secret put`, or .dev.vars locally):
-  //   OPENAI_API_KEY, TAVILY_API_KEY
+  },
+  // Daily auto-run at 07:00 UTC. Test locally: wrangler dev --test-scheduled
+  "triggers": {
+    "crons": ["0 7 * * *"]
+  },
+  // Create namespaces first:
+  //   wrangler kv namespace create RESEARCH_KV          → paste prod id below
+  //   wrangler kv namespace create RESEARCH_KV --preview → paste preview_id below
+  "kv_namespaces": [
+    {
+      "binding": "RESEARCH_KV",
+      "id": "201a43ccae1f436da2fc23ab6fd83688",
+      "preview_id": "077df9697ed34350bd1c12f3fa29ea7f"
+    }
+  ]
+  ,
+  // Run: wrangler d1 migrations apply research-agent-db --remote
+  "d1_databases": [
+    {
+      "binding": "RESEARCH_DB",
+      "database_name": "research-agent-db",
+      "database_id": "da3be8bc-7306-415a-8b3f-e95351bf18d1"
+    }
+  ]
+  // Secrets (wrangler secret put, or .dev.vars locally):
+  //   ANTHROPIC_API_KEY   – your Anthropic key
+  //   TAVILY_API_KEY      – your Tavily key
+  //   MANUAL_PASSWORD     – password that guards the Run Now button
 }

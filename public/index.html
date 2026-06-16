@@ -29,7 +29,33 @@
       <div class="rule"></div>
     </header>
 
-    <section class="panel controls">
+    <!-- Last-run banner + action toggles -->
+    <div class="panel run-header">
+      <span class="run-label" id="lastRunLabel">// LOADING LATEST BRIEFING...</span>
+      <div class="run-header-btns">
+        <button class="btn" id="toggleHistoryPanel">[ HISTORY ]</button>
+        <button class="btn" id="toggleRunPanel">[ RUN NOW ]</button>
+      </div>
+    </div>
+
+    <!-- History panel -->
+    <section class="panel history-panel" id="historyPanel" hidden>
+      <div class="history-filters">
+        <input type="text"  id="filterTopic" placeholder="Filter by topic…" />
+        <input type="date"  id="filterFrom"  title="From date" />
+        <input type="date"  id="filterTo"    title="To date" />
+        <button class="btn" id="applyFilter">[ FILTER ]</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+      <div class="history-pagination" id="historyPagination" hidden>
+        <button class="btn" id="histPrev">[ PREV ]</button>
+        <span class="run-label" id="histPage">1 / 1</span>
+        <button class="btn" id="histNext">[ NEXT ]</button>
+      </div>
+    </section>
+
+    <!-- Manual run panel — owner only, collapsed by default -->
+    <section class="panel controls" id="runPanel" hidden>
       <div class="sliders">
         <label>look back (days): <b id="daysVal">7</b>
           <input type="range" id="days" min="1" max="30" value="7" />
@@ -40,26 +66,16 @@
       </div>
 
       <div class="selects">
-        <label>engine
-          <select id="provider">
-            <option value="anthropic">Claude (Anthropic)</option>
-            <option value="openai">OpenAI</option>
-          </select>
-        </label>
         <label>model
           <select id="model"></select>
         </label>
       </div>
 
       <div class="keys">
-        <label><span id="llmKeyText">Anthropic API key</span>
-          <input type="password" id="apiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
-        </label>
-        <label>Tavily API key
-          <input type="password" id="tavilyKey" placeholder="tvly-..." autocomplete="off" spellcheck="false" />
+        <label><span class="lock-ic" aria-hidden="true"></span>access key
+          <input type="password" id="password" placeholder="••••••••" autocomplete="off" spellcheck="false" />
         </label>
       </div>
-      <p class="keys-note"><span class="lock-ic" aria-hidden="true"></span><b>Bring your own keys.</b> They're sent only with your request and used in-memory to call the model &amp; search — <b>never stored, logged, or saved</b> (not on the server, not in your browser). Free Tavily key at <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a>.</p>
 
       <div class="presets-label">Quick topics — click to run:</div>
       <div class="presets">
@@ -105,7 +121,7 @@
           <code>plan → search → score → synthesize → reflect</code>. After drafting a
           briefing, the <b>reflect</b> node critiques its own coverage, lists what's
           missing, and loops back to run <i>targeted</i> searches — repeating until
-          coverage is solid or it hits your <b>max research passes</b> cap.</p>
+          coverage is solid or it hits the <b>max research passes</b> cap.</p>
 
         <p><b>Substance tags</b></p>
         <div class="legend">
@@ -120,9 +136,9 @@
           <div class="cyber-tech tech-python"><span class="tic"></span><span class="tx"><b>TypeScript</b><small>Worker runtime</small></span></div>
           <div class="cyber-tech tech-langgraph"><span class="tic"></span><span class="tx"><b>LangGraph.js</b><small>agent graph + reflect loop</small></span></div>
           <div class="cyber-tech tech-langchain"><span class="tic"></span><span class="tx"><b>LangChain.js</b><small>LLM orchestration layer</small></span></div>
-          <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>OpenAI · Claude</b><small>selectable LLM engine</small></span></div>
+          <div class="cyber-tech tech-openai"><span class="tic"></span><span class="tx"><b>Claude (Anthropic)</b><small>reasoning engine</small></span></div>
           <div class="cyber-tech tech-tavily"><span class="tic"></span><span class="tx"><b>Tavily</b><small>recency-aware news search</small></span></div>
-          <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + static assets</small></span></div>
+          <div class="cyber-tech tech-streamlit"><span class="tic"></span><span class="tx"><b>Cloudflare</b><small>Workers + KV + Cron</small></span></div>
         </div>
 
         <p class="muted"><i>The Matrix rain, neon UI, sound FX, and ♫ background music
@@ -130,7 +146,7 @@
       </div>
     </details>
 
-    <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + OpenAI/Claude + Tavily on Cloudflare ◢◤</footer>
+    <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + Claude + Tavily on Cloudflare ◢◤</footer>
   </main>
 
   <button id="musicBtn" class="music-btn" type="button">&#9835; MUSIC: OFF</button>

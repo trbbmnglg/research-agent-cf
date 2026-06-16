@@ -150,6 +150,7 @@ async function tavilySearch(apiKey: string, query: string, days: number): Promis
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as { results?: TavilyResult[] };
@@ -247,12 +248,14 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     }
   }
 
-  // 2. search — run each query, APPEND new docs, dedupe by URL across passes.
+  // 2. search — run all queries in parallel, APPEND new docs, dedupe by URL across passes.
   async function search(state: State): Promise<Partial<State>> {
     const seen = new Set(state.docs.map((d) => d.url));
+    const allResults = await Promise.all(
+      state.queries.map((q) => tavilySearch(tavilyKey, q, state.days)),
+    );
     const newDocs: Doc[] = [];
-    for (const q of state.queries) {
-      const results = await tavilySearch(tavilyKey, q, state.days);
+    for (const results of allResults) {
       for (const r of results) {
         const url = r.url;
         if (!url || seen.has(url)) continue;
@@ -268,7 +271,7 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     return { docs: [...state.docs, ...newDocs] };
   }
 
-  // 3. score — rate each NOT-yet-scored doc against the profile; drop the weak ones.
+  // 3. score — rate each NOT-yet-scored doc in parallel; drop the weak ones.
   async function score(state: State): Promise<Partial<State>> {
     const system =
       "You score one AI-news item for a specific reader and tag its substance.\n" +
@@ -279,22 +282,27 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
       'Reply with ONLY JSON: {"relevance": <int 0-10>, "reason": "<one line, why it ' +
       'matters to THIS reader>", "tag": "<Shipped|Announced|Research|Hype>"}';
     const docs = state.docs;
-    for (const doc of docs) {
-      if (doc.relevance !== undefined) continue; // scored on an earlier pass
-      const user =
-        `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
-        `Article:\nTitle: ${doc.title}\nDate: ${doc.date}\nContent: ${doc.content}`;
-      try {
-        const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(await ask(fastLlm, system, user));
-        doc.relevance = Math.max(0, Math.min(10, Math.round(Number(v.relevance ?? 5))));
-        doc.reason = String(v.reason ?? "").trim() || "(no reason)";
-        doc.tag = normalizeTag(v.tag);
-      } catch {
-        doc.relevance = 5;
-        doc.reason = "(unscored — could not parse model output)";
-        doc.tag = "Announced";
-      }
-    }
+    await Promise.all(
+      docs
+        .filter((doc) => doc.relevance === undefined)
+        .map(async (doc) => {
+          const user =
+            `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
+            `Article:\nTitle: ${doc.title}\nDate: ${doc.date}\nContent: ${doc.content}`;
+          try {
+            const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(
+              await ask(fastLlm, system, user),
+            );
+            doc.relevance = Math.max(0, Math.min(10, Math.round(Number(v.relevance ?? 5))));
+            doc.reason = String(v.reason ?? "").trim() || "(no reason)";
+            doc.tag = normalizeTag(v.tag);
+          } catch {
+            doc.relevance = 5;
+            doc.reason = "(unscored — could not parse model output)";
+            doc.tag = "Announced";
+          }
+        }),
+    );
     const kept = docs.filter((d) => (d.relevance ?? 0) >= RELEVANCE_FLOOR);
     kept.sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
     return { docs: kept };
@@ -316,7 +324,8 @@ function buildGraph(provider: Provider, model: string, apiKey: string, tavilyKey
     const system =
       "You write a concise, personalized AI-news briefing in markdown.\n" +
       "Rules:\n" +
-      "- Group items under short **bold thematic headers**.\n" +
+      "- Do NOT use emoji anywhere — no emoji in headers, bullets, or body text.\n" +
+      "- Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text for section headers.\n" +
       "- Within a group, keep the given order (most relevant first).\n" +
       "- Each item is one bullet that STARTS with its substance token, copied verbatim " +
       "from the input — exactly one of [[SHIPPED]] [[ANNOUNCED]] [[RESEARCH]] [[HYPE]] — " +
