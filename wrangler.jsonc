@@ -43,8 +43,18 @@
       "database_id": "da3be8bc-7306-415a-8b3f-e95351bf18d1"
     }
   ]
+  // Plain vars — edit here, override in .dev.vars for local dev.
+  // Not sensitive; API keys go via `wrangler secret put` instead.
+  ,
+  "vars": {
+    "NOTIFY_EMAIL": "your@email.com",         // recipient for daily briefing emails
+    "NOTIFY_FROM":  "briefings@yourdomain.com" // must be a verified Resend sender domain
+  }
   // Secrets (wrangler secret put, or .dev.vars locally):
-  //   ANTHROPIC_API_KEY   – your Anthropic key
-  //   TAVILY_API_KEY      – your Tavily key
+  //   ANTHROPIC_API_KEY   – Anthropic key
+  //   TAVILY_API_KEY      – Tavily key
   //   MANUAL_PASSWORD     – password that guards the Run Now button
+  //   LANGCHAIN_API_KEY   – (optional) LangSmith tracing key — smith.langchain.com
+  //   LANGCHAIN_PROJECT   – (optional) LangSmith project name, defaults to "research-agent-cf"
+  //   RESEND_API_KEY      – (optional) Resend key for daily email delivery — resend.com
 }

@@ -5,6 +5,7 @@
 //  GET  /api/runs/:id    → full run by id
 //  POST /api/run         → password-protected manual trigger; uses server-side keys
 //  GET  /api/models      → model list for the UI picker
+//  GET  /api/graph       → LangGraph Mermaid diagram string
 //  *                     → served as static files from /public (assets binding)
 
 import { runResearch, getGraphDiagram, MODELS, type Provider, type ProgressEvent } from "./agent";
@@ -28,6 +29,110 @@ interface Env {
   MANUAL_PASSWORD: string;
   LANGCHAIN_API_KEY?: string;   // optional — enables LangSmith tracing
   LANGCHAIN_PROJECT?: string;   // optional — defaults to "research-agent-cf"
+  RESEND_API_KEY?: string;      // optional — enables email delivery via Resend
+  NOTIFY_EMAIL?: string;        // recipient address for daily briefing emails
+  NOTIFY_FROM?: string;         // verified sender address (e.g. briefings@yourdomain.com)
+}
+
+// ── Email delivery (Resend REST API) ─────────────────────────────────────── //
+
+function briefingToHtml(md: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  const TAG_BG: Record<string, string> = {
+    Shipped: "#16a34a", Announced: "#d97706", Research: "#2563eb", Hype: "#dc2626",
+  };
+  const inline = (s: string): string => {
+    let t = esc(s);
+    t = t.replace(/\[\[(SHIPPED|ANNOUNCED|RESEARCH|HYPE)\]\]/gi, (_, tag) => {
+      const label = tag.charAt(0).toUpperCase() + tag.slice(1).toLowerCase();
+      const bg = TAG_BG[label] ?? "#6b7280";
+      return `<span style="background:${bg};color:#fff;padding:1px 7px;border-radius:3px;font-size:11px;font-weight:600;letter-spacing:.3px">${label}</span>`;
+    });
+    t = t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#0ea5e9;text-decoration:none">$1</a>');
+    return t;
+  };
+
+  const rows: string[] = [];
+  for (const raw of md.split("\n")) {
+    const h2 = raw.match(/^## (.+)/);
+    if (h2) { rows.push(`<h2 style="margin:22px 0 6px;font-size:16px;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:4px">${inline(h2[1])}</h2>`); continue; }
+    const h3 = raw.match(/^### (.+)/);
+    if (h3) { rows.push(`<h3 style="margin:16px 0 4px;font-size:14px;color:#1e293b">${inline(h3[1])}</h3>`); continue; }
+    const h1 = raw.match(/^# (.+)/);
+    if (h1) { rows.push(`<h1 style="margin:0 0 14px;font-size:19px;color:#0f172a">${inline(h1[1])}</h1>`); continue; }
+    const bq = raw.match(/^> (.+)/);
+    if (bq) { rows.push(`<blockquote style="border-left:3px solid #0ea5e9;margin:10px 0;padding:8px 14px;background:#f0f9ff;color:#0369a1;border-radius:0 4px 4px 0">${inline(bq[1])}</blockquote>`); continue; }
+    const li = raw.match(/^[*\-] (.+)/);
+    if (li) { rows.push(`<li style="margin:3px 0">${inline(li[1])}</li>`); continue; }
+    if (!raw.trim()) { rows.push("<br>"); continue; }
+    rows.push(`<p style="margin:5px 0;line-height:1.6">${inline(raw)}</p>`);
+  }
+  return rows.join("\n");
+}
+
+function buildEmailHtml(
+  topic: string, runAt: string, model: string, answer: string, docCount: number,
+): string {
+  const date = new Date(runAt).toLocaleDateString("en-US", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC",
+  });
+  const time = new Date(runAt).toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+  }) + " UTC";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Briefing: ${topic}</title></head>
+<body style="margin:0;padding:20px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+<div style="max-width:680px;margin:0 auto">
+  <div style="background:#04060a;border-radius:8px 8px 0 0;padding:22px 30px">
+    <div style="font-size:10px;letter-spacing:3px;color:#00f0ff;opacity:.65;text-transform:uppercase">// Personalized Intelligence Feed</div>
+    <div style="font-size:21px;font-weight:700;color:#00f0ff;margin-top:5px;letter-spacing:1px">AI NEWS AGENT</div>
+  </div>
+  <div style="background:#fff;padding:10px 30px 2px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
+    <p style="margin:10px 0;font-size:13px;color:#64748b">
+      <strong style="color:#0f172a">${topic}</strong>
+      &nbsp;&middot;&nbsp;${date}&nbsp;&middot;&nbsp;${time}
+      &nbsp;&middot;&nbsp;<span style="color:#94a3b8">${model}</span>
+      &nbsp;&middot;&nbsp;${docCount} source${docCount === 1 ? "" : "s"}
+    </p>
+  </div>
+  <div style="background:#fff;padding:4px 30px 28px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
+    ${briefingToHtml(answer)}
+  </div>
+  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;padding:14px 30px;text-align:center">
+    <a href="https://research-agent.robertbumanglagjr.com" style="color:#0ea5e9;font-size:13px;text-decoration:none">
+      Open full briefing in browser →
+    </a>
+  </div>
+</div>
+</body></html>`;
+}
+
+async function sendBriefingEmail(
+  apiKey: string, to: string, from: string,
+  topic: string, runAt: string, model: string, answer: string, docCount: number,
+): Promise<void> {
+  const dateShort = new Date(runAt).toLocaleDateString("en-US", {
+    month: "short", day: "numeric", timeZone: "UTC",
+  });
+  const subject = `AI Briefing: ${topic} — ${dateShort}`;
+  const html = buildEmailHtml(topic, runAt, model, answer, docCount);
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, subject, html }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Resend ${res.status}: ${body}`);
+  }
+  console.log(`[email] briefing sent to ${to}`);
 }
 
 interface RunBody {
@@ -255,8 +360,21 @@ export default {
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     console.log("[cron] starting daily research run");
     try {
-      await runAndStore(env, CRON_TOPIC, CRON_QUESTION, CRON_DAYS, CRON_MAX_ITERATIONS, CRON_MODEL, "cron");
+      const result = await runAndStore(
+        env, CRON_TOPIC, CRON_QUESTION, CRON_DAYS, CRON_MAX_ITERATIONS, CRON_MODEL, "cron",
+      );
       console.log("[cron] daily research run complete");
+
+      if (env.RESEND_API_KEY && env.NOTIFY_EMAIL && env.NOTIFY_FROM) {
+        try {
+          await sendBriefingEmail(
+            env.RESEND_API_KEY, env.NOTIFY_EMAIL, env.NOTIFY_FROM,
+            result.topic, result.runAt, result.model, result.answer, result.docs.length,
+          );
+        } catch (e) {
+          console.error("[cron] email send failed (non-fatal):", e);
+        }
+      }
     } catch (e) {
       console.error("[cron] research run failed:", e);
     }

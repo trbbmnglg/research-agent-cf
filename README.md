@@ -45,7 +45,8 @@ Every run is persisted to Cloudflare D1. Before each new run the agent reads its
 | Worker / routing | API routes + SSE streaming + static asset fallback | `src/index.ts` |
 | UI (cyberpunk) | Static HTML/CSS/JS, `<canvas>` + Web Audio | `public/` |
 | Profile | Your role / stack / interests / ignore list | `src/profile.ts` |
-| Tracing | LangSmith (optional — set `LANGCHAIN_API_KEY` secret) | `src/index.ts` |
+| Tracing | LangSmith (optional — `LANGCHAIN_API_KEY` secret) | `src/index.ts` |
+| Email delivery | Resend REST API (optional — `RESEND_API_KEY` secret) | `src/index.ts` |
 
 `wrangler.jsonc` uses `run_worker_first: ["/api/*"]`, so the Worker only runs for API calls; everything else is served straight from `public/` by the assets binding.
 
@@ -84,12 +85,29 @@ npx wrangler secret put MANUAL_PASSWORD   # gates the Run Now button
 | `TAVILY_API_KEY` | <https://app.tavily.com> — free tier |
 | `MANUAL_PASSWORD` | any passphrase you choose |
 
-Optionally enable LangSmith tracing:
+Optional — LangSmith tracing ([smith.langchain.com](https://smith.langchain.com)):
 
 ```bash
-npx wrangler secret put LANGCHAIN_API_KEY   # from smith.langchain.com
-npx wrangler secret put LANGCHAIN_PROJECT   # e.g. "research-agent-cf"
+npx wrangler secret put LANGCHAIN_API_KEY   # your LangSmith API key
+npx wrangler secret put LANGCHAIN_PROJECT   # project name, e.g. "research-agent-cf"
 ```
+
+Optional — daily email delivery via [Resend](https://resend.com):
+
+```bash
+npx wrangler secret put RESEND_API_KEY      # your Resend API key
+```
+
+Then set the recipient and sender addresses in `wrangler.jsonc` under `"vars"`:
+
+```jsonc
+"vars": {
+  "NOTIFY_EMAIL": "you@email.com",             // where you want briefings sent
+  "NOTIFY_FROM":  "briefings@yourdomain.com"   // must be verified in Resend dashboard
+}
+```
+
+The `NOTIFY_FROM` address requires your domain to be verified in Resend. If you just want to test, Resend allows sending to your own verified email using `onboarding@resend.dev` as the from address on the free tier.
 
 ### Cloudflare D1
 
