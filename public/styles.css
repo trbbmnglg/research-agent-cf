@@ -58,6 +58,11 @@ a:hover{ color:var(--mg); text-shadow:0 0 8px rgba(255,43,214,.6); text-decorati
 .title::after{ color:var(--cy); animation:glitch2 2.2s infinite steps(2) alternate-reverse; }
 @keyframes glitch1{ 0%{clip-path:inset(0 0 82% 0);transform:translate(-2px,-1px);} 25%{clip-path:inset(40% 0 40% 0);transform:translate(2px,1px);} 50%{clip-path:inset(70% 0 10% 0);transform:translate(-1px,1px);} 100%{clip-path:inset(10% 0 60% 0);transform:translate(2px,-1px);} }
 @keyframes glitch2{ 0%{clip-path:inset(60% 0 20% 0);transform:translate(2px,1px);} 35%{clip-path:inset(15% 0 55% 0);transform:translate(-2px,-1px);} 70%{clip-path:inset(48% 0 35% 0);transform:translate(1px,1px);} 100%{clip-path:inset(78% 0 8% 0);transform:translate(-2px,1px);} }
+.title-row{ display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.ver-tag{ font-family:'Share Tech Mono',monospace; font-size:.72rem; letter-spacing:2.5px;
+  color:var(--cy); border:1px solid rgba(0,240,255,.45); padding:3px 9px;
+  text-shadow:0 0 8px rgba(0,240,255,.5); opacity:.85; white-space:nowrap;
+  position:relative; top:-4px; }
 .sub{ color:var(--ink-dim); max-width:62ch; font-size:1.02rem; }
 .rule{ height:2px; margin:.7rem 0 0; background:linear-gradient(90deg,transparent,var(--cy),var(--vi),var(--mg),transparent); box-shadow:0 0 14px rgba(0,240,255,.6); background-size:200% 100%; animation:ruleflow 6s linear infinite; }
 @keyframes ruleflow{ from{background-position:0 0;} to{background-position:200% 0;} }
