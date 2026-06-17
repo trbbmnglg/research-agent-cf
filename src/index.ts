@@ -106,38 +106,86 @@ function briefingToHtml(md: string): string {
 
 function buildImagePrompt(topic: string): string {
   const style =
-    "cyberpunk aesthetic, neon cyan and teal glow on pitch black background, " +
-    "circuit board patterns, neural network nodes, holographic interface elements, " +
-    "cinematic lighting, ultra sharp, 8k, no text, no words, no letters";
+    "anime illustration style, cyberpunk city background, vibrant neon lights pink and cyan, " +
+    "cel-shaded 2D art, Studio Trigger anime aesthetic, Cyberpunk Edgerunners inspired, " +
+    "dramatic cinematic composition, atmospheric dark city, glowing signs, " +
+    "no text, no words, no letters";
   const t = topic.toLowerCase();
   let subject: string;
   if (t.includes("agi")) {
-    subject = "luminous synthetic brain with infinite glowing neural pathways, consciousness emerging from darkness";
+    subject = "anime character with glowing eyes contemplating an infinite digital void, consciousness awakening";
   } else if (t.includes("cybersecurity") || t.includes("security")) {
-    subject = "shattered digital lock with neon shards, glowing shield protecting a neural core, binary code rain";
+    subject = "anime hacker in neon-lit cyberpunk city, holographic shields and locks, digital warfare";
   } else if (t.includes("agent") || t.includes("agentic")) {
-    subject = "interconnected autonomous AI agent nodes forming a vast glowing network graph in the dark";
+    subject = "anime figure surrounded by glowing autonomous AI agent nodes, cyberpunk cityscape at night";
   } else if (t.includes("llm") || t.includes("language model")) {
-    subject = "towering transformer attention matrix, floating glowing tokens, language model architecture visualization";
+    subject = "anime character interfacing with a giant holographic language model neural network, cyberpunk lab";
   } else if (t.includes("open source") || t.includes("open-source")) {
-    subject = "collaborative glowing code branches merging into a luminous central neural core node";
+    subject = "anime developers collaborating in a neon-lit cyberpunk workshop, code streams everywhere";
   } else {
-    subject = `${topic} abstract technology visualization, glowing data streams, floating neon nodes`;
+    subject = `cyberpunk anime scene representing ${topic}, futuristic neon-lit city, dramatic lighting`;
   }
   return `${subject}, ${style}`;
+}
+
+function buildThumbnailSvg(topic: string, base64Png: string): string {
+  const svgEsc = (s: string) => s
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // Split topic into at most 2 lines of ≤ 20 chars each
+  const words = topic.toUpperCase().split(" ");
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if (cur.length + w.length + 1 > 20 && cur) {
+      lines.push(cur); cur = w;
+      if (lines.length >= 2) break;
+    } else { cur = cur ? `${cur} ${w}` : w; }
+  }
+  if (lines.length < 2 && cur) lines.push(cur);
+
+  const n = lines.length;
+  const baseY = n === 1 ? 606 : 574;
+  const textEls = lines.map((line, i) =>
+    `<text x="350" y="${baseY + i * 52}" text-anchor="middle" ` +
+    `font-family="'Courier New',monospace" font-weight="bold" font-size="44" ` +
+    `fill="#00f0ff" filter="url(#glow)" letter-spacing="2">${svgEsc(line)}</text>`,
+  ).join("");
+  const brandY = baseY + n * 52 + 6;
+
+  return (
+    `<svg width="700" height="700" viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg">` +
+    `<image href="data:image/png;base64,${base64Png}" x="0" y="0" width="700" height="700" preserveAspectRatio="xMidYMid slice"/>` +
+    `<defs>` +
+      `<linearGradient id="g" x1="0" y1="0" x2="0" y2="1">` +
+        `<stop offset="35%" stop-color="#04060a" stop-opacity="0"/>` +
+        `<stop offset="100%" stop-color="#04060a" stop-opacity="0.93"/>` +
+      `</linearGradient>` +
+      `<filter id="glow" x="-20%" y="-30%" width="140%" height="160%">` +
+        `<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>` +
+        `<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>` +
+      `</filter>` +
+    `</defs>` +
+    `<rect width="700" height="700" fill="url(#g)"/>` +
+    `<path d="M0,50 L0,0 L50,0" fill="none" stroke="#00f0ff" stroke-width="2.5" opacity="0.8"/>` +
+    `<path d="M650,0 L700,0 L700,50" fill="none" stroke="#00f0ff" stroke-width="2.5" opacity="0.8"/>` +
+    `<path d="M0,650 L0,700 L50,700" fill="none" stroke="#00f0ff" stroke-width="2.5" opacity="0.8"/>` +
+    `<path d="M650,700 L700,700 L700,650" fill="none" stroke="#00f0ff" stroke-width="2.5" opacity="0.8"/>` +
+    textEls +
+    `<text x="350" y="${brandY}" text-anchor="middle" font-family="'Courier New',monospace" ` +
+    `font-size="13" fill="rgba(0,240,255,0.6)" letter-spacing="5">// AI NEWS AGENT</text>` +
+    `</svg>`
+  );
 }
 
 async function generateAndStoreThumbnail(env: Env, runId: number, topic: string): Promise<void> {
   const prompt = buildImagePrompt(topic);
   const output = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", { prompt, steps: 4 });
   if (!output.image) throw new Error("Workers AI returned no image");
-  // base64 → binary for KV storage
-  const binary = atob(output.image);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  await env.RESEARCH_KV.put(`thumb:${runId}`, bytes.buffer as ArrayBuffer, {
-    metadata: { contentType: "image/png" },
-  });
+  // Wrap generated image in an SVG with topic title overlay
+  const svg = buildThumbnailSvg(topic, output.image);
+  await env.RESEARCH_KV.put(`thumb:${runId}`, svg);
   await updateRunImageUrl(env.RESEARCH_DB, runId, `/api/runs/${runId}/thumbnail`);
   console.log(`[thumbnail] generated for run ${runId}`);
 }
@@ -372,11 +420,11 @@ export default {
     // ── /api/runs/:id/thumbnail ───────────────────────────────────────────── //
     const thumbMatch = url.pathname.match(/^\/api\/runs\/(\d+)\/thumbnail$/);
     if (thumbMatch && request.method === "GET") {
-      const data = await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}`, { type: "arrayBuffer" });
+      const data = await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}`);
       if (!data) return new Response("Not found", { status: 404 });
       return new Response(data, {
         headers: {
-          "Content-Type": "image/png",
+          "Content-Type": "image/svg+xml",
           "Cache-Control": "public, max-age=604800",
         },
       });
@@ -468,10 +516,8 @@ export default {
       );
       console.log("[cron] daily research run complete");
 
-      let thumbnailUrl: string | undefined;
       try {
         await generateAndStoreThumbnail(env, result.id, CRON_TOPIC);
-        thumbnailUrl = `/api/runs/${result.id}/thumbnail`;
       } catch (e) {
         console.error("[cron] thumbnail generation failed (non-fatal):", e);
       }
@@ -481,7 +527,6 @@ export default {
           await sendBriefingEmail(
             env.RESEND_API_KEY, env.NOTIFY_EMAIL, env.NOTIFY_FROM,
             result.topic, result.runAt, result.model, result.answer, result.docs.length,
-            thumbnailUrl,
           );
         } catch (e) {
           console.error("[cron] email send failed (non-fatal):", e);

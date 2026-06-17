@@ -121,8 +121,8 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
 
 /* ---------- briefing thumbnail ---------- */
 .briefing-thumb{
-  width:100%; max-height:220px; object-fit:cover; display:block;
-  border:1px solid rgba(0,240,255,.3); border-radius:4px; margin-bottom:18px;
+  width:700px; max-width:100%; height:auto; display:block; margin:0 auto 18px;
+  border:1px solid rgba(0,240,255,.3); border-radius:4px;
   box-shadow:0 0 24px rgba(0,240,255,.15);
 }
 
