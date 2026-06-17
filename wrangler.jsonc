@@ -48,7 +48,7 @@
   ,
   "vars": {
     "NOTIFY_EMAIL": "web.rbbjr@gmail.com",
-    "NOTIFY_FROM":  "briefings@robertbumanglagjr.com"
+    "NOTIFY_FROM":  "newsagent@robertbumanglagjr.com"
   }
   // Secrets (wrangler secret put, or .dev.vars locally):
   //   ANTHROPIC_API_KEY   – Anthropic key
