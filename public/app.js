@@ -477,6 +477,18 @@ async function runManual(topic, question) {
         statusEl.hidden = true;
         runPanel.hidden = true;
         toggleBtn.textContent = "[ RUN NOW ]";
+        // Thumbnail is generated in background after stream closes.
+        // Poll once after ~10s and re-render if image_url is now available.
+        if (ev.id && !ev.image_url) {
+          setTimeout(async () => {
+            try {
+              const r = await fetch(`/api/runs/${ev.id}`, { signal: AbortSignal.timeout(8_000) });
+              if (!r.ok) return;
+              const updated = await r.json();
+              if (updated.image_url) renderWithMeta(updated);
+            } catch {}
+          }, 10_000);
+        }
       } else if (ev.type === "error") {
         setStatus("⚠ " + esc(ev.message || "Unknown error"), false);
       } else {
