@@ -55,7 +55,7 @@ function resolveModel(provider: Provider, model?: string): string {
   return model && allowed.includes(model) ? model : DEFAULTS[provider];
 }
 
-const MAX_RESULTS_PER_QUERY = 5;
+const MAX_RESULTS_PER_QUERY = 3;
 const RELEVANCE_FLOOR = 4;
 
 // Soft preference — quality AI sources. If a query starves against these, the
@@ -169,7 +169,7 @@ async function tavilySearch(apiKey: string, query: string, days: number): Promis
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(6_000),
     });
     if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as { results?: TavilyResult[] };
@@ -302,7 +302,9 @@ function buildGraph(
     ];
 
     // Tool-calling loop: Claude decides how many searches to run.
-    const MAX_ROUNDS = 2;
+    // One round is enough — Claude calls 2–4 queries in parallel. A second round
+    // adds another full LLM + Tavily batch and regularly pushes past the 28s limit.
+    const MAX_ROUNDS = 1;
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
         const response = (await llmWithTools.invoke(messages)) as AIMessage;
@@ -369,7 +371,7 @@ function buildGraph(
             const raw = await Promise.race([
               ask(fastLlm, system, user),
               new Promise<never>((_, rej) => {
-                scoreTimer = setTimeout(() => rej(new Error("score timeout")), 5_000);
+                scoreTimer = setTimeout(() => rej(new Error("score timeout")), 3_000);
               }),
             ]).finally(() => clearTimeout(scoreTimer));
             const v = extractJson<{ relevance?: number; reason?: string; tag?: string }>(raw);
