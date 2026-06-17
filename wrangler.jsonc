@@ -43,6 +43,10 @@
       "database_id": "da3be8bc-7306-415a-8b3f-e95351bf18d1"
     }
   ]
+  // Workers AI binding — used for thumbnail generation (FLUX schnell).
+  // Free tier: 10,000 neurons/day; FLUX schnell ≈ 150 neurons/image.
+  ,
+  "ai": { "binding": "AI" }
   // Plain vars — edit here, override in .dev.vars for local dev.
   // Not sensitive; API keys go via `wrangler secret put` instead.
   ,

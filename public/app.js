@@ -526,7 +526,10 @@ function renderWithMeta(result) {
 }
 
 function render(result) {
-  briefingEl.innerHTML = marked.parse(tagify(stripEmoji(result.answer || "_No briefing returned._")));
+  const thumbHtml = result.image_url
+    ? `<img class="briefing-thumb" src="${esc(result.image_url)}" alt="" loading="lazy" />`
+    : "";
+  briefingEl.innerHTML = thumbHtml + marked.parse(tagify(stripEmoji(result.answer || "_No briefing returned._")));
   briefingEl.hidden = false;
 
   const docs = result.docs || [];

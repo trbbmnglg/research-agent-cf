@@ -9,7 +9,7 @@
 //  *                     → served as static files from /public (assets binding)
 
 import { runResearch, getGraphDiagram, MODELS, type Provider, type ProgressEvent } from "./agent";
-import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps } from "./db";
+import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps, updateRunImageUrl } from "./db";
 
 // Default parameters for the daily cron run — tuned to the owner's profile.
 const CRON_TOPIC = "Agentic AI and LLM developments";
@@ -32,6 +32,7 @@ interface Env {
   RESEND_API_KEY?: string;      // optional — enables email delivery via Resend
   NOTIFY_EMAIL?: string;        // recipient address for daily briefing emails
   NOTIFY_FROM?: string;         // verified sender address (e.g. briefings@yourdomain.com)
+  AI: Ai;                       // Workers AI binding — thumbnail generation (FLUX schnell)
 }
 
 // ── Email delivery (Resend REST API) ─────────────────────────────────────── //
@@ -101,8 +102,49 @@ function briefingToHtml(md: string): string {
   return rows.join("\n");
 }
 
+// ── Thumbnail generation (Workers AI — FLUX schnell + KV storage) ─────────── //
+
+function buildImagePrompt(topic: string): string {
+  const style =
+    "cyberpunk aesthetic, neon cyan and teal glow on pitch black background, " +
+    "circuit board patterns, neural network nodes, holographic interface elements, " +
+    "cinematic lighting, ultra sharp, 8k, no text, no words, no letters";
+  const t = topic.toLowerCase();
+  let subject: string;
+  if (t.includes("agi")) {
+    subject = "luminous synthetic brain with infinite glowing neural pathways, consciousness emerging from darkness";
+  } else if (t.includes("cybersecurity") || t.includes("security")) {
+    subject = "shattered digital lock with neon shards, glowing shield protecting a neural core, binary code rain";
+  } else if (t.includes("agent") || t.includes("agentic")) {
+    subject = "interconnected autonomous AI agent nodes forming a vast glowing network graph in the dark";
+  } else if (t.includes("llm") || t.includes("language model")) {
+    subject = "towering transformer attention matrix, floating glowing tokens, language model architecture visualization";
+  } else if (t.includes("open source") || t.includes("open-source")) {
+    subject = "collaborative glowing code branches merging into a luminous central neural core node";
+  } else {
+    subject = `${topic} abstract technology visualization, glowing data streams, floating neon nodes`;
+  }
+  return `${subject}, ${style}`;
+}
+
+async function generateAndStoreThumbnail(env: Env, runId: number, topic: string): Promise<void> {
+  const prompt = buildImagePrompt(topic);
+  const output = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", { prompt, steps: 4 });
+  if (!output.image) throw new Error("Workers AI returned no image");
+  // base64 → binary for KV storage
+  const binary = atob(output.image);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  await env.RESEARCH_KV.put(`thumb:${runId}`, bytes.buffer as ArrayBuffer, {
+    metadata: { contentType: "image/png" },
+  });
+  await updateRunImageUrl(env.RESEARCH_DB, runId, `/api/runs/${runId}/thumbnail`);
+  console.log(`[thumbnail] generated for run ${runId}`);
+}
+
 function buildEmailHtml(
   topic: string, runAt: string, model: string, answer: string, docCount: number,
+  thumbnailUrl?: string,
 ): string {
   const d = new Date(runAt);
   const date = d.toLocaleDateString("en-US", {
@@ -113,6 +155,10 @@ function buildEmailHtml(
   }) + " UTC";
   const safeTopic = htmlEsc(topic);
   const safeModel = htmlEsc(model);
+  const thumbTag = thumbnailUrl
+    ? `<img src="https://research-agent.robertbumanglagjr.com${htmlEsc(thumbnailUrl)}" `+
+      `style="width:100%;max-height:200px;object-fit:cover;border-radius:4px;margin:0 0 16px;display:block" alt="" />`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -133,7 +179,7 @@ function buildEmailHtml(
     </p>
   </div>
   <div style="background:#fff;padding:4px 30px 28px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0">
-    ${briefingToHtml(answer)}
+    ${thumbTag}${briefingToHtml(answer)}
   </div>
   <div style="background:#f8fafc;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;padding:14px 30px;text-align:center">
     <a href="https://research-agent.robertbumanglagjr.com" style="color:#0ea5e9;font-size:13px;text-decoration:none">
@@ -147,12 +193,13 @@ function buildEmailHtml(
 async function sendBriefingEmail(
   apiKey: string, to: string, from: string,
   topic: string, runAt: string, model: string, answer: string, docCount: number,
+  thumbnailUrl?: string,
 ): Promise<void> {
   const dateShort = new Date(runAt).toLocaleDateString("en-US", {
     month: "short", day: "numeric", timeZone: "UTC",
   });
   const subject = `AI Briefing: ${topic} — ${dateShort}`;
-  const html = buildEmailHtml(topic, runAt, model, answer, docCount);
+  const html = buildEmailHtml(topic, runAt, model, answer, docCount, thumbnailUrl);
 
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -322,6 +369,19 @@ export default {
       }
     }
 
+    // ── /api/runs/:id/thumbnail ───────────────────────────────────────────── //
+    const thumbMatch = url.pathname.match(/^\/api\/runs\/(\d+)\/thumbnail$/);
+    if (thumbMatch && request.method === "GET") {
+      const data = await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}`, { type: "arrayBuffer" });
+      if (!data) return new Response("Not found", { status: 404 });
+      return new Response(data, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=604800",
+        },
+      });
+    }
+
     // ── /api/run (manual trigger — streams SSE progress events) ──────────  //
     if (url.pathname === "/api/run") {
       if (request.method !== "POST") {
@@ -366,11 +426,13 @@ export default {
           ]).finally(close);
         }, 28_000);
 
+        let storedId: number | undefined;
         try {
           const stored = await runAndStore(
             env, topic, question, days, maxIter, model, "manual",
             (event) => { void emit(event); },
           );
+          storedId = stored.id;
           clearTimeout(timeout);
           await emit({ type: "result", ...stored });
         } catch (e) {
@@ -378,6 +440,11 @@ export default {
           await emit({ type: "error", message: e instanceof Error ? e.message : String(e) });
         } finally {
           await close();
+        }
+        // Generate thumbnail in background after stream closes (non-fatal)
+        if (storedId !== undefined) {
+          try { await generateAndStoreThumbnail(env, storedId, topic); }
+          catch (e) { console.error("[run] thumbnail failed (non-fatal):", e); }
         }
       })());
 
@@ -401,11 +468,20 @@ export default {
       );
       console.log("[cron] daily research run complete");
 
+      let thumbnailUrl: string | undefined;
+      try {
+        await generateAndStoreThumbnail(env, result.id, CRON_TOPIC);
+        thumbnailUrl = `/api/runs/${result.id}/thumbnail`;
+      } catch (e) {
+        console.error("[cron] thumbnail generation failed (non-fatal):", e);
+      }
+
       if (env.RESEND_API_KEY && env.NOTIFY_EMAIL && env.NOTIFY_FROM) {
         try {
           await sendBriefingEmail(
             env.RESEND_API_KEY, env.NOTIFY_EMAIL, env.NOTIFY_FROM,
             result.topic, result.runAt, result.model, result.answer, result.docs.length,
+            thumbnailUrl,
           );
         } catch (e) {
           console.error("[cron] email send failed (non-fatal):", e);

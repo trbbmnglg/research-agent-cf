@@ -119,6 +119,13 @@ input[type=range]::-moz-range-thumb{ width:16px; height:16px; border:none; borde
 .spinner{ width:16px; height:16px; border:2px solid rgba(0,240,255,.25); border-top-color:var(--cy); border-radius:50%; animation:spin .8s linear infinite; box-shadow:0 0 8px rgba(0,240,255,.6); }
 @keyframes spin{ to{ transform:rotate(360deg); } }
 
+/* ---------- briefing thumbnail ---------- */
+.briefing-thumb{
+  width:100%; max-height:220px; object-fit:cover; display:block;
+  border:1px solid rgba(0,240,255,.3); border-radius:4px; margin-bottom:18px;
+  box-shadow:0 0 24px rgba(0,240,255,.15);
+}
+
 /* ---------- briefing markdown ---------- */
 .briefing h1,.briefing h2,.briefing h3{ font-size:1.05rem; margin:1.1rem 0 .4rem; }
 .briefing h2::before,.briefing h3::before{

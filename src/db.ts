@@ -14,6 +14,7 @@ export interface RunSummary {
   model: string;
   trigger: string;
   doc_count: number;
+  image_url?: string;
 }
 
 export interface FullRun extends RunSummary {
@@ -73,13 +74,18 @@ export async function insertRun(
   return runId;
 }
 
+export async function updateRunImageUrl(db: D1Database, id: number, imageUrl: string): Promise<void> {
+  await db.prepare(`UPDATE runs SET image_url = ? WHERE id = ?`).bind(imageUrl, id).run();
+}
+
 // --------------------------------------------------------------------------- //
 // Read — single run
 // --------------------------------------------------------------------------- //
 export async function getRun(db: D1Database, id: number): Promise<FullRun | null> {
   const row = await db
     .prepare(
-      `SELECT r.*, (SELECT COUNT(*) FROM docs WHERE run_id = r.id) AS doc_count
+      `SELECT r.id, r.run_at, r.topic, r.question, r.provider, r.model, r.trigger, r.answer, r.image_url,
+              (SELECT COUNT(*) FROM docs WHERE run_id = r.id) AS doc_count
        FROM runs r WHERE r.id = ?`,
     )
     .bind(id)
@@ -91,7 +97,8 @@ export async function getRun(db: D1Database, id: number): Promise<FullRun | null
 export async function getLatestRun(db: D1Database): Promise<FullRun | null> {
   const row = await db
     .prepare(
-      `SELECT r.*, (SELECT COUNT(*) FROM docs WHERE run_id = r.id) AS doc_count
+      `SELECT r.id, r.run_at, r.topic, r.question, r.provider, r.model, r.trigger, r.answer, r.image_url,
+              (SELECT COUNT(*) FROM docs WHERE run_id = r.id) AS doc_count
        FROM runs r ORDER BY r.run_at DESC LIMIT 1`,
     )
     .first<RunSummary & { answer: string }>();
@@ -203,7 +210,7 @@ export async function listRuns(db: D1Database, filters: ListFilters): Promise<Ru
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const sql = `
-    SELECT r.id, r.run_at, r.topic, r.question, r.provider, r.model, r.trigger,
+    SELECT r.id, r.run_at, r.topic, r.question, r.provider, r.model, r.trigger, r.image_url,
            (SELECT COUNT(*) FROM docs WHERE run_id = r.id) AS doc_count
     FROM runs r
     ${where}
