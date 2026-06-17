@@ -61,4 +61,5 @@
   //   LANGCHAIN_API_KEY   – (optional) LangSmith tracing key — smith.langchain.com
   //   LANGCHAIN_PROJECT   – (optional) LangSmith project name, defaults to "research-agent-cf"
   //   RESEND_API_KEY      – (optional) Resend key for daily email delivery — resend.com
+  //   OPENAI_API_KEY      – (optional) OpenAI key for DALL-E 3 thumbnail generation — platform.openai.com
 }
