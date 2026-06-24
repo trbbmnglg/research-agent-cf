@@ -20,6 +20,13 @@
   "observability": {
     "enabled": true
   },
+  // Smart Placement routes the Worker to the Cloudflare region closest to its
+  // upstream dependencies (Anthropic, Tavily, OpenAI) rather than to the user.
+  // This is critical — without it the Worker runs from APAC which is geo-blocked
+  // by both Anthropic and OpenAI's images API.
+  "placement": {
+    "mode": "smart"
+  },
   // Daily auto-run at 07:00 UTC. Test locally: wrangler dev --test-scheduled
   "triggers": {
     "crons": ["0 7 * * *"]
@@ -52,7 +59,11 @@
   ,
   "vars": {
     "NOTIFY_EMAIL": "web.rbbjr@gmail.com",
-    "NOTIFY_FROM":  "newsagent@robertbumanglagjr.com"
+    "NOTIFY_FROM":  "newsagent@robertbumanglagjr.com",
+    // CF AI Gateway base — routes OpenAI calls through Cloudflare's network.
+    // Create the gateway at dash.cloudflare.com → AI Gateway → "research-agent"
+    // then paste: https://gateway.ai.cloudflare.com/v1/<account_id>/research-agent
+    "CF_AI_GATEWAY": "https://gateway.ai.cloudflare.com/v1/7f817fd99a51e8d8de80bab50f356220/research-agent"
   }
   // Secrets (wrangler secret put, or .dev.vars locally):
   //   ANTHROPIC_API_KEY   – Anthropic key
@@ -61,5 +72,6 @@
   //   LANGCHAIN_API_KEY   – (optional) LangSmith tracing key — smith.langchain.com
   //   LANGCHAIN_PROJECT   – (optional) LangSmith project name, defaults to "research-agent-cf"
   //   RESEND_API_KEY      – (optional) Resend key for daily email delivery — resend.com
-  //   OPENAI_API_KEY      – (optional) OpenAI key for DALL-E 3 thumbnail generation — platform.openai.com
+  //   OPENAI_API_KEY      – (optional) OpenAI key for gpt-image-2 thumbnail generation — platform.openai.com
+  //   CF_AI_GATEWAY_KEY   – (optional) Gateway API key when "Require Authentication" is on in AI Gateway settings
 }

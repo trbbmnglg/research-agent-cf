@@ -99,6 +99,11 @@
         <input type="text" id="freeform" placeholder="Or ask your own: e.g. new LangGraph features and open-source agent frameworks" />
         <button class="btn primary" id="research">Research</button>
       </div>
+
+      <div class="danger-zone">
+        <button class="btn btn-danger" id="cleanupBtn">[ CLEAN UP NEWS ]</button>
+        <span class="danger-hint">deletes all runs &amp; thumbnails</span>
+      </div>
     </section>
 
     <section id="status" class="status" hidden></section>
@@ -179,7 +184,20 @@
     <footer class="footer">◢◤ AI NEWS AGENT // LangGraph.js + Claude + Tavily on Cloudflare ◢◤</footer>
   </main>
 
-  <button id="musicBtn" class="music-btn" type="button">&#9835; MUSIC: OFF</button>
+  <button id="musicBtn" class="music-btn on" type="button">&#9835; MUSIC: ON</button>
+
+  <!-- Custom confirm modal -->
+  <div id="confirmModal" class="modal-overlay" hidden>
+    <div class="modal-box">
+      <div class="modal-icon">⚠</div>
+      <div class="modal-title">CONFIRM CLEANUP</div>
+      <div class="modal-body">This will permanently delete <b>all news runs</b> and <b>all thumbnails</b>. The database will be reset to zero.</div>
+      <div class="modal-actions">
+        <button class="btn btn-danger" id="modalConfirm">[ DELETE ALL ]</button>
+        <button class="btn" id="modalCancel">[ CANCEL ]</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js" type="module"></script>
 </body>

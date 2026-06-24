@@ -5,8 +5,9 @@
   "type": "module",
   "description": "Self-correcting AI news research agent — LangGraph.js on Cloudflare Workers",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build-prompts": "node scripts/build-prompts.mjs",
+    "dev": "npm run build-prompts && wrangler dev",
+    "deploy": "npm run build-prompts && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"
   },
@@ -17,7 +18,9 @@
     "@langchain/openai": "^1.4.7"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.9.3",
+    "js-yaml": "^4.2.0",
     "typescript": "^6.0.3",
     "wrangler": "^4.100.0"
   }

@@ -1,5 +1,4 @@
-// Your personal profile — the lens the agent scores every news item through
-// ("why should I care?"). Edit freely.
+import { PROMPTS } from "./prompts";
 
 export interface Profile {
   role: string;
@@ -8,9 +7,10 @@ export interface Profile {
   ignore: string[];
 }
 
+const p = PROMPTS.profile;
 export const PROFILE: Profile = {
-  role: "backend developer",
-  stack: ["LangGraph", "Python", "FastAPI", "Postgres"],
-  interests: ["agentic AI", "AI agents", "LLM orchestration", "AGI"],
-  ignore: ["image generation", "AI art", "crypto"],
+  role: p.role,
+  stack: [...p.stack],
+  interests: [...p.interests],
+  ignore: [...p.ignore],
 };

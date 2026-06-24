@@ -23,6 +23,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage }
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { PROFILE, type Profile } from "./profile";
+import { PROMPTS } from "./prompts";
 
 // --------------------------------------------------------------------------- //
 // Providers & models — the UI picks one per request. Search/fetch is handled by
@@ -210,16 +211,14 @@ type State = typeof StateAnnotation.State;
 // --------------------------------------------------------------------------- //
 function makeLlm(provider: Provider, model: string, apiKey: string, maxTokens: number): BaseChatModel {
   if (provider === "anthropic") {
-    // Claude 4.6 / Fable use adaptive thinking and REJECT thinking.type.disabled.
-    // Claude 4.5 (Haiku) doesn't support adaptive but accepts disabled (cheaper/faster).
-    // `thinking` requires temperature: 1; disabled lets us pin a deterministic 0.
+    // Only pass `thinking` for models that support it (claude-4.6 / fable).
+    // Passing thinking: disabled to Haiku/other non-thinking models causes 403.
     const adaptive = /-4-6|fable/.test(model);
     return new ChatAnthropic({
       apiKey,
       model,
       maxTokens,
-      thinking: adaptive ? { type: "adaptive" } : { type: "disabled" },
-      temperature: adaptive ? 1 : 0,
+      ...(adaptive ? { thinking: { type: "adaptive" as const }, temperature: 1 } : { temperature: 0 }),
     });
   }
   return new ChatOpenAI({ apiKey, model, temperature: 0, maxTokens });
@@ -289,12 +288,7 @@ function buildGraph(
       : "";
 
     const messages: BaseMessage[] = [
-      new SystemMessage(
-        "You are a news research assistant gathering articles for a personalized AI briefing.\n" +
-        "Use the search_news tool to find relevant articles. Call it 2–4 times with varied queries " +
-        "to cover the topic from multiple angles (broad overview, specific sub-topics, key players).\n" +
-        "Stop calling tools once you have gathered enough material."
-      ),
+      new SystemMessage(PROMPTS.agent.researcher.system),
       new HumanMessage(
         `Topic: ${state.topic}\nRequest: ${state.question}\n` +
         `Reader profile: ${JSON.stringify(state.profile)}${gapContext}`
@@ -350,14 +344,7 @@ function buildGraph(
   async function score(state: State): Promise<Partial<State>> {
     const unscored = state.docs.filter((doc) => doc.relevance === undefined);
     onProgress?.({ type: "score_start", total: unscored.length });
-    const system =
-      "You score one AI-news item for a specific reader and tag its substance.\n" +
-      "relevance: 0-10 — how much THIS reader should care, given their role, stack, " +
-      "and interests. Penalize anything matching their ignore list.\n" +
-      "tag: exactly one of Shipped (generally available), Announced (previewed, not " +
-      "usable yet), Research (paper/finding), Hype (speculation/marketing).\n" +
-      'Reply with ONLY JSON: {"relevance": <int 0-10>, "reason": "<one line, why it ' +
-      'matters to THIS reader>", "tag": "<Shipped|Announced|Research|Hype>"}';
+    const system = PROMPTS.agent.score.system;
     const docs = state.docs;
     await Promise.all(
       docs
@@ -411,21 +398,7 @@ function buildGraph(
           `  excerpt: ${d.content.slice(0, 400)}`,
       )
       .join("\n\n");
-    const system =
-      "You write a concise, personalized AI-news briefing in markdown.\n" +
-      "Rules:\n" +
-      "- Do NOT use emoji anywhere — no emoji in headers, items, or body text.\n" +
-      "- Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text.\n" +
-      "- Within a group, keep the given order (most relevant first).\n" +
-      "- Each item follows this EXACT three-line structure:\n" +
-      "    - [[TAG]] Headline — Source Name, Date\n" +
-      "      Description. Why this matters to you: one sentence tied to reader role/stack.\n" +
-      "      [→ source](source_url)\n" +
-      "  Line 1: the [[TAG]] token then headline then source name and date. NO URL on this line.\n" +
-      "  Line 2: description and why-it-matters. NO URL on this line.\n" +
-      "  Line 3: the markdown link [→ source](source_url) — use the exact source_url from the input. NOTHING ELSE on this line.\n" +
-      "- Strip hype and marketing; be plain and useful. Do NOT invent facts beyond the excerpts.\n" +
-      "- Start with a one-sentence TL;DR, then the grouped items.";
+    const system = PROMPTS.agent.synthesize.system;
     const user =
       `Request: ${state.question}\nTopic: ${state.topic}\n` +
       `Reader profile: ${JSON.stringify(state.profile)}\n\n` +
@@ -444,13 +417,7 @@ function buildGraph(
   async function reflect(state: State): Promise<Partial<State>> {
     const iteration = state.iteration + 1;
     onProgress?.({ type: "reflect_start", iteration });
-    const system =
-      "You are a strict editor judging whether an AI-news briefing fully answers the " +
-      "reader's request given their profile. Identify concrete MISSING angles, " +
-      "sub-topics, or recent developments the draft should have covered but didn't. " +
-      "Be honest but don't invent needs.\n" +
-      'Reply with ONLY JSON: {"sufficient": <true|false>, "gaps": ["specific missing ' +
-      'angle", ...], "reasoning": "<one short paragraph>"}';
+    const system = PROMPTS.agent.reflect.system;
     const user =
       `Original request: ${state.question}\nTopic: ${state.topic}\n` +
       `Reader profile: ${JSON.stringify(state.profile)}\n\nBriefing draft:\n${state.answer}`;
@@ -495,13 +462,13 @@ function buildGraph(
 // Graph diagram — used by /api/graph to show the agentic loop in the UI.
 // --------------------------------------------------------------------------- //
 export function getGraphDiagram(): string {
+  let base: string;
   try {
     // Build with placeholder keys — we only need the graph structure, never invoke.
     const compiled = buildGraph("anthropic", "claude-haiku-4-5-20251001", "sk-ant-placeholder", "placeholder");
-    return compiled.getGraph().drawMermaid();
+    base = compiled.getGraph().drawMermaid();
   } catch {
-    // Fallback if the build or drawMermaid throws
-    return [
+    base = [
       "graph TD",
       "  __start__([Start]):::first",
       "  researcher(researcher)",
@@ -519,6 +486,18 @@ export function getGraphDiagram(): string {
       "  classDef last fill:#1a0533",
     ].join("\n");
   }
+  // Append thumbnail as a post-research step (runs after the agent loop ends).
+  const classDefIdx = base.search(/\n\s*classDef\b/);
+  if (classDefIdx !== -1) {
+    return (
+      base.slice(0, classDefIdx) +
+      "\n  thumbnail(thumbnail)" +
+      "\n  __end__ --> thumbnail" +
+      base.slice(classDefIdx) +
+      "\n  class thumbnail last"
+    );
+  }
+  return base + "\n  thumbnail(thumbnail)\n  __end__ --> thumbnail";
 }
 
 // --------------------------------------------------------------------------- //

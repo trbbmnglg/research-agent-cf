@@ -125,7 +125,25 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
   let booted = false;
   const boot = () => { if (booted) return; booted = true; tone(220, 0.12, "sawtooth", 0.05); setTimeout(() => tone(880, 0.18, "sawtooth", 0.04), 90); };
 
-  document.addEventListener("pointerdown", (e) => { boot(); if (isHit(e.target)) sClick(); }, true);
+  // Auto-start music on first page interaction (browser blocks audio until then).
+  // Skip if the first click IS the music button — let the toggle handler take over.
+  let musicAutoStarted = false;
+  function autoStartMusic() {
+    if (musicAutoStarted) return;
+    musicAutoStarted = true;
+    if (!music || !music.on) {
+      const on = toggleMusic();
+      btn.innerHTML = on ? "&#9835; MUSIC: ON" : "&#9835; MUSIC: OFF";
+      btn.classList.toggle("on", on);
+    }
+  }
+
+  document.addEventListener("pointerdown", (e) => {
+    boot();
+    if (e.target.id !== "musicBtn") autoStartMusic();
+    else musicAutoStarted = true; // user manually interacted with btn first — don't auto-start later
+    if (isHit(e.target)) sClick();
+  }, true);
   let lastHover = null;
   document.addEventListener("mouseover", (e) => {
     const t = isHit(e.target);
@@ -175,6 +193,7 @@ import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
   }
   const btn = document.getElementById("musicBtn");
   btn.addEventListener("click", () => {
+    musicAutoStarted = true;
     const on = toggleMusic();
     btn.innerHTML = on ? "&#9835; MUSIC: ON" : "&#9835; MUSIC: OFF";
     btn.classList.toggle("on", on);
@@ -291,6 +310,46 @@ document.querySelectorAll(".preset").forEach((b) =>
     }
   })
 );
+
+const confirmModal = $("confirmModal");
+
+function showConfirm() {
+  return new Promise((resolve) => {
+    confirmModal.hidden = false;
+    const done = (result) => { confirmModal.hidden = true; resolve(result); };
+    $("modalConfirm").addEventListener("click", () => done(true), { once: true });
+    $("modalCancel").addEventListener("click",  () => done(false), { once: true });
+    // Backdrop click = cancel
+    confirmModal.addEventListener("click", function onBackdrop(e) {
+      if (e.target === confirmModal) { confirmModal.removeEventListener("click", onBackdrop); done(false); }
+    });
+  });
+}
+
+$("cleanupBtn").addEventListener("click", async () => {
+  const password = passwordEl.value.trim();
+  if (!password) { setStatus("⚠ Enter your access key above first.", false); passwordEl.focus(); return; }
+  const confirmed = await showConfirm();
+  if (!confirmed) return;
+  setBusy(true);
+  setStatus("Cleaning up…", true);
+  try {
+    const res = await fetch("/api/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    briefingEl.hidden = true; sourcesEl.hidden = true; reasoningEl.hidden = true;
+    lastRunLabel.textContent = "// ALL NEWS DELETED — CLICK RUN NOW TO START FRESH";
+    statusEl.hidden = true;
+  } catch (e) {
+    setStatus("⚠ " + (e?.message || e), false);
+  } finally {
+    setBusy(false);
+  }
+});
 
 $("research").addEventListener("click", () => {
   const q = $("freeform").value.trim();
@@ -430,9 +489,30 @@ function statusForEvent(ev) {
       return ev.sufficient
         ? "Coverage confirmed — finalizing…"
         : `Gaps found: ${ev.gaps.slice(0, 2).map((g) => `"${g}"`).join(", ")}${ev.gaps.length > 2 ? "…" : ""}`;
+    case "thumbnail_start":
+      return "Generating news thumbnail…";
     default:
       return null;
   }
+}
+
+// Poll /api/runs/:id until image_url appears, then inject thumbnails above each article.
+function pollThumbnail(runId) {
+  let attempts = 0;
+  const MAX = 12; // 12 × 4s = 48s max
+  const timer = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch(`/api/runs/${runId}`, { signal: AbortSignal.timeout(8_000) });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.image_url) {
+        clearInterval(timer);
+        injectArticleThumbs(parseThumbUrls(data.image_url));
+      }
+    } catch {}
+    if (attempts >= MAX) clearInterval(timer);
+  }, 4_000);
 }
 
 async function runManual(topic, question) {
@@ -477,18 +557,8 @@ async function runManual(topic, question) {
         statusEl.hidden = true;
         runPanel.hidden = true;
         toggleBtn.textContent = "[ RUN NOW ]";
-        // Thumbnail is generated in background after stream closes.
-        // Poll once after ~10s and re-render if image_url is now available.
-        if (ev.id && !ev.image_url) {
-          setTimeout(async () => {
-            try {
-              const r = await fetch(`/api/runs/${ev.id}`, { signal: AbortSignal.timeout(8_000) });
-              if (!r.ok) return;
-              const updated = await r.json();
-              if (updated.image_url) renderWithMeta(updated);
-            } catch {}
-          }, 10_000);
-        }
+        // Thumbnail generates post-stream with news context — poll until it appears.
+        if (!ev.image_url && ev.id) pollThumbnail(ev.id);
       } else if (ev.type === "error") {
         setStatus("⚠ " + esc(ev.message || "Unknown error"), false);
       } else {
@@ -537,12 +607,31 @@ function renderWithMeta(result) {
   render(result);
 }
 
+function parseThumbUrls(imageUrl) {
+  if (!imageUrl) return [];
+  try {
+    const parsed = JSON.parse(imageUrl);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [imageUrl];
+  } catch { return [imageUrl]; }
+}
+
+function injectArticleThumbs(thumbUrls) {
+  const items = briefingEl.querySelectorAll("li");
+  thumbUrls.forEach((url, i) => {
+    if (i >= items.length || !url) return;
+    const existing = items[i].querySelector(".article-thumb");
+    if (existing) { existing.src = url; return; }
+    const img = document.createElement("img");
+    img.className = "article-thumb"; img.src = url; img.alt = ""; img.loading = "lazy";
+    items[i].prepend(img);
+  });
+}
+
 function render(result) {
-  const thumbHtml = result.image_url
-    ? `<img class="briefing-thumb" src="${esc(result.image_url)}" alt="" loading="lazy" />`
-    : "";
-  briefingEl.innerHTML = thumbHtml + marked.parse(tagify(stripEmoji(result.answer || "_No briefing returned._")));
+  briefingEl.innerHTML = marked.parse(tagify(stripEmoji(result.answer || "_No briefing returned._")));
   briefingEl.hidden = false;
+  // Inject per-article thumbnails if already available (history load / re-render)
+  if (result.image_url) injectArticleThumbs(parseThumbUrls(result.image_url));
 
   const docs = result.docs || [];
   sourcesBody.innerHTML = docs.length

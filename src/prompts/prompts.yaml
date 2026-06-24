@@ -1,0 +1,82 @@
+# ============================================================================
+# research-agent-cf — all configurable prompts and settings
+# Edit this file freely. Run `npm run build-prompts` (or `npm run deploy`)
+# to regenerate src/prompts/generated.ts.
+# ============================================================================
+
+# ─── Cron defaults ──────────────────────────────────────────────────────────
+cron:
+  topic: "Agentic AI and LLM developments"
+  question: "What's the latest in agentic AI, AI agents, LLM orchestration, and major AI model releases?"
+  days: 7
+  maxIterations: 2
+  model: "claude-haiku-4-5-20251001"
+
+# ─── Reader profile ─────────────────────────────────────────────────────────
+# The lens the agent scores every news item through ("why should I care?").
+profile:
+  role: "backend developer"
+  stack:
+    - LangGraph
+    - Python
+    - FastAPI
+    - Postgres
+  interests:
+    - agentic AI
+    - AI agents
+    - LLM orchestration
+    - AGI
+  ignore:
+    - image generation
+    - AI art
+    - crypto
+
+# ─── Agent system prompts ───────────────────────────────────────────────────
+agent:
+  researcher:
+    system: |
+      You are a news research assistant gathering articles for a personalized AI briefing.
+      Use the search_news tool to find relevant articles. Call it 2–4 times with varied queries
+      to cover the topic from multiple angles (broad overview, specific sub-topics, key players).
+      Stop calling tools once you have gathered enough material.
+
+  score:
+    system: |
+      You score one AI-news item for a specific reader and tag its substance.
+      relevance: 0-10 — how much THIS reader should care, given their role, stack, and interests. Penalize anything matching their ignore list.
+      tag: exactly one of Shipped (generally available), Announced (previewed, not usable yet), Research (paper/finding), Hype (speculation/marketing).
+      Reply with ONLY JSON: {"relevance": <int 0-10>, "reason": "<one line, why it matters to THIS reader>", "tag": "<Shipped|Announced|Research|Hype>"}
+
+  synthesize:
+    system: |
+      You write a concise, personalized AI-news briefing in markdown.
+      Rules:
+      - Do NOT use emoji anywhere — no emoji in headers, items, or body text.
+      - Group items under ## markdown headings (e.g. '## Agentic AI'). Use ## not bold text.
+      - Within a group, keep the given order (most relevant first).
+      - Each item follows this EXACT three-line structure:
+            - [[TAG]] Headline — Source Name, Date
+              Description. Why this matters to you: one sentence tied to reader role/stack.
+              [→ source](source_url)
+          Line 1: the [[TAG]] token then headline then source name and date. NO URL on this line.
+          Line 2: description and why-it-matters. NO URL on this line.
+          Line 3: the markdown link [→ source](source_url) — use the exact source_url from the input. NOTHING ELSE on this line.
+      - Strip hype and marketing; be plain and useful. Do NOT invent facts beyond the excerpts.
+      - Start with a one-sentence TL;DR, then the grouped items.
+
+  reflect:
+    system: |
+      You are a strict editor judging whether an AI-news briefing fully answers the reader's request given their profile. Identify concrete MISSING angles, sub-topics, or recent developments the draft should have covered but didn't. Be honest but don't invent needs.
+      Reply with ONLY JSON: {"sufficient": <true|false>, "gaps": ["specific missing angle", ...], "reasoning": "<one short paragraph>"}
+
+# ─── Thumbnail generation ───────────────────────────────────────────────────
+# Generated via Workers AI (FLUX schnell binding — no geo-restrictions, ~3-5s).
+# size: target banner dimensions — code rounds to nearest multiple of 16 for FLUX.
+thumbnail:
+  size: "1546x423"
+
+  # style: visual art direction appended to every prompt.
+  style: "Art style: Cyberpunk Edgerunners anime, Studio Trigger cel-shaded 2D illustration, vibrant pink and cyan neon lights, dark atmospheric cyberpunk city. Ultra-wide cinematic banner composition, 16:4 panoramic aspect ratio, no letterboxing."
+
+  # text_overlay: text instructions; {title} is replaced with the news topic.
+  text_overlay: 'At the bottom-left of the banner, in bold neon cyan glowing letters, display: "{title} — AI NEWS AGENT". Text must be clearly legible with neon glow on dark background.'

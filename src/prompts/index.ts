@@ -1,0 +1,1 @@
+export { PROMPTS } from "./generated";

@@ -10,14 +10,13 @@
 
 import { runResearch, getGraphDiagram, MODELS, type Provider, type ProgressEvent } from "./agent";
 import { insertRun, getRun, getLatestRun, listRuns, getLatestRunForTopic, getRecentGaps, updateRunImageUrl } from "./db";
+import { PROMPTS } from "./prompts";
 
-// Default parameters for the daily cron run — tuned to the owner's profile.
-const CRON_TOPIC = "Agentic AI and LLM developments";
-const CRON_QUESTION =
-  "What's the latest in agentic AI, AI agents, LLM orchestration, and major AI model releases?";
-const CRON_DAYS = 7;
-const CRON_MAX_ITERATIONS = 2;
-const CRON_MODEL = "claude-haiku-4-5-20251001";
+const CRON_TOPIC          = PROMPTS.cron.topic;
+const CRON_QUESTION       = PROMPTS.cron.question;
+const CRON_DAYS           = PROMPTS.cron.days;
+const CRON_MAX_ITERATIONS = PROMPTS.cron.maxIterations;
+const CRON_MODEL          = PROMPTS.cron.model;
 const HISTORY_PAGE_SIZE = 20;
 
 interface Env {
@@ -33,7 +32,9 @@ interface Env {
   NOTIFY_EMAIL?: string;        // recipient address for daily briefing emails
   NOTIFY_FROM?: string;         // verified sender address (e.g. briefings@yourdomain.com)
   AI: Ai;                       // Workers AI binding (kept; unused after DALL-E switch)
-  OPENAI_API_KEY?: string;      // optional — enables DALL-E 3 thumbnail generation
+  OPENAI_API_KEY?: string;      // optional — enables gpt-image-2 thumbnail generation
+  CF_AI_GATEWAY?: string;       // optional — CF AI Gateway base URL for OpenAI routing
+  CF_AI_GATEWAY_KEY?: string;   // optional — gateway API key when gateway auth is enabled
 }
 
 // ── Email delivery (Resend REST API) ─────────────────────────────────────── //
@@ -103,75 +104,77 @@ function briefingToHtml(md: string): string {
   return rows.join("\n");
 }
 
-// ── Thumbnail generation (DALL-E 3 via OpenAI API + KV storage) ──────────── //
+// ── Thumbnail generation (Workers AI — FLUX schnell binding) ─────────────── //
+// Generates one banner thumbnail per article (up to 5), each sized to fit the
+// news content width. Workers AI binding is exempt from HTTP wall-clock limits.
+// Thumbnails generate AFTER research (so prompts use real article titles) in
+// ctx.waitUntil; the client polls /api/runs/:id until image_url appears.
 
-function buildImagePrompt(topic: string): string {
-  const title = topic.length > 32 ? topic.slice(0, 32).trimEnd() : topic;
-  const t = topic.toLowerCase();
-
-  let scene: string;
-  if (t.includes("agi")) {
-    scene = "anime character with luminous neural eyes facing an infinite glowing digital cosmos, consciousness awakening";
-  } else if (t.includes("cybersecurity") || t.includes("security")) {
-    scene = "anime hacker in a rain-soaked neon-lit cyberpunk city, holographic shields and digital locks floating around her";
-  } else if (t.includes("agent") || t.includes("agentic")) {
-    scene = "lone anime figure standing on a cyberpunk rooftop at night, surrounded by an orbiting network of glowing AI agent nodes";
-  } else if (t.includes("llm") || t.includes("language model")) {
-    scene = "anime character jacked into a massive glowing holographic language model in a dark neon cyberpunk lab";
-  } else if (t.includes("open source") || t.includes("open-source")) {
-    scene = "anime engineers in a vibrant neon cyberpunk workshop, streams of open-source code glowing around them";
-  } else {
-    scene = `cinematic cyberpunk anime scene representing ${topic}, futuristic neon-lit skyline, dramatic atmospheric lighting`;
-  }
-
-  return (
-    `${scene}. ` +
-    `Art style: Cyberpunk Edgerunners anime, Studio Trigger cel-shaded 2D illustration, ` +
-    `vibrant pink and cyan neon lights, dark atmospheric cyberpunk city, cinematic wide-angle composition. ` +
-    `1024x1024 square format. ` +
-    `At the bottom of the image, in large bold neon cyan glowing letters on a dark gradient background, ` +
-    `display the text: "${title}". ` +
-    `Below it in smaller letters: "AI NEWS AGENT". ` +
-    `The text must be clearly legible with a neon cyan glow effect.`
-  );
+function parseSize(s: string): { width: number; height: number } {
+  const [w, h] = s.toLowerCase().split("x").map(Number);
+  const r16 = (n: number) => Math.round(n / 16) * 16;
+  // FLUX schnell max dimension is 1344px (CF Workers AI limit).
+  const clamp = (n: number) => Math.min(1344, Math.max(256, r16(n || 1024)));
+  return { width: clamp(w), height: clamp(h) };
 }
 
-async function generateAndStoreThumbnail(env: Env, runId: number, topic: string): Promise<void> {
-  if (!env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY not set — thumbnail skipped");
+function buildArticlePrompt(articleTitle: string): string {
+  const { style, text_overlay } = PROMPTS.thumbnail;
+  const clean = articleTitle.split(" — ")[0].trim();
+  const display = clean.length > 45 ? clean.slice(0, 45).trimEnd() + "…" : clean;
+  const scene = `ultra-wide panoramic cyberpunk anime banner about: "${clean}". Neon-lit AI cityscape at night, holographic data streams, dramatic atmospheric lighting`;
+  return `${scene}. ${style} ${text_overlay.replace("{title}", display)}`;
+}
 
-  const res = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "dall-e-3",
-      prompt: buildImagePrompt(topic),
-      size: "1024x1024",
-      quality: "standard",
-      response_format: "b64_json",
-      n: 1,
-    }),
-    signal: AbortSignal.timeout(60_000),
-  });
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => "");
-    throw new Error(`DALL-E 3 ${res.status}: ${err}`);
+async function decodeAiResult(raw: unknown): Promise<Uint8Array> {
+  if (raw instanceof ReadableStream) {
+    return new Uint8Array(await new Response(raw).arrayBuffer());
   }
+  const b64 = (raw as { image: string }).image;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 
-  const json = await res.json() as { data?: Array<{ b64_json?: string }> };
-  const b64 = json.data?.[0]?.b64_json;
-  if (!b64) throw new Error("DALL-E 3 returned no image data");
+// Generates one thumbnail per article (up to 5) in parallel — stored as
+// thumb:runId:0 … thumb:runId:4 in KV, URLs saved as JSON in image_url.
+async function generateAndStoreThumbnails(
+  env: Env, runId: number, docs: Array<{ title: string }>,
+): Promise<void> {
+  const targets = docs.slice(0, 5);
+  const { width, height } = parseSize(PROMPTS.thumbnail.size);
 
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  console.log(`[thumbnail] starting ${targets.length} thumbnails at ${width}x${height} for run ${runId}`);
+  const results = await Promise.allSettled(
+    targets.map(async (doc, i) => {
+      console.log(`[thumbnail] generating ${i + 1}/${targets.length}: "${doc.title.slice(0, 40)}"`);
+      const raw = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
+        prompt: buildArticlePrompt(doc.title),
+        steps: 4,
+        width,
+        height,
+      });
+      const bytes = await decodeAiResult(raw);
+      await env.RESEARCH_KV.put(`thumb:${runId}:${i}`, bytes.buffer as ArrayBuffer);
+      return `/api/runs/${runId}/thumb/${i}` as string;
+    }),
+  );
 
-  await env.RESEARCH_KV.put(`thumb:${runId}`, bytes.buffer as ArrayBuffer);
-  await updateRunImageUrl(env.RESEARCH_DB, runId, `/api/runs/${runId}/thumbnail`);
-  console.log(`[thumbnail] generated for run ${runId} via DALL-E 3`);
+  const urls = results.map((r, i) => {
+    if (r.status === "rejected") {
+      console.error(`[thumbnail] doc ${i} failed:`, r.reason instanceof Error ? r.reason.message : r.reason);
+      return null;
+    }
+    return r.value;
+  });
+  const succeeded = urls.filter(Boolean).length;
+  if (succeeded > 0) {
+    await updateRunImageUrl(env.RESEARCH_DB, runId, JSON.stringify(urls));
+    console.log(`[thumbnail] stored ${succeeded}/${targets.length} for run ${runId}`);
+  } else {
+    console.error(`[thumbnail] all ${targets.length} thumbnails failed for run ${runId}`);
+  }
 }
 
 function buildEmailHtml(
@@ -187,8 +190,14 @@ function buildEmailHtml(
   }) + " UTC";
   const safeTopic = htmlEsc(topic);
   const safeModel = htmlEsc(model);
-  const thumbTag = thumbnailUrl
-    ? `<img src="https://research-agent.robertbumanglagjr.com${htmlEsc(thumbnailUrl)}" `+
+  // image_url may be a JSON array (per-article thumbnails) — use the first for email header.
+  let firstThumb: string | undefined;
+  if (thumbnailUrl) {
+    try { firstThumb = (JSON.parse(thumbnailUrl) as (string|null)[])[0] ?? undefined; }
+    catch { firstThumb = thumbnailUrl; }
+  }
+  const thumbTag = firstThumb
+    ? `<img src="https://research-agent.robertbumanglagjr.com${htmlEsc(firstThumb)}" `+
       `style="width:100%;max-height:200px;object-fit:cover;border-radius:4px;margin:0 0 16px;display:block" alt="" />`
     : "";
 
@@ -401,17 +410,59 @@ export default {
       }
     }
 
-    // ── /api/runs/:id/thumbnail ───────────────────────────────────────────── //
-    const thumbMatch = url.pathname.match(/^\/api\/runs\/(\d+)\/thumbnail$/);
-    if (thumbMatch && request.method === "GET") {
-      const data = await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}`, { type: "arrayBuffer" });
+    // ── /api/runs/:id/thumb/:n  (per-article banner) ─────────────────────── //
+    const thumbNMatch = url.pathname.match(/^\/api\/runs\/(\d+)\/thumb\/(\d+)$/);
+    if (thumbNMatch && request.method === "GET") {
+      const data = await env.RESEARCH_KV.get(`thumb:${thumbNMatch[1]}:${thumbNMatch[2]}`, { type: "arrayBuffer" });
       if (!data) return new Response("Not found", { status: 404 });
       return new Response(data, {
-        headers: {
-          "Content-Type": "image/png",
-          "Cache-Control": "public, max-age=604800",
-        },
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" },
       });
+    }
+
+    // ── /api/runs/:id/thumbnail  (legacy single-image endpoint) ───────────── //
+    const thumbMatch = url.pathname.match(/^\/api\/runs\/(\d+)\/thumbnail$/);
+    if (thumbMatch && request.method === "GET") {
+      // Try new indexed key first, fall back to old key for backwards compat
+      const data = await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}:0`, { type: "arrayBuffer" })
+        ?? await env.RESEARCH_KV.get(`thumb:${thumbMatch[1]}`, { type: "arrayBuffer" });
+      if (!data) return new Response("Not found", { status: 404 });
+      return new Response(data, {
+        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" },
+      });
+    }
+
+    // ── /api/cleanup (wipe all runs + thumbnails, password-protected) ───── //
+    if (url.pathname === "/api/cleanup" && request.method === "POST") {
+      let body: { password?: string };
+      try { body = (await request.json()) as { password?: string }; }
+      catch { return Response.json({ error: "Invalid JSON body." }, { status: 400 }); }
+      if (!body.password || body.password !== env.MANUAL_PASSWORD) {
+        return Response.json({ error: "Invalid access key." }, { status: 401 });
+      }
+      try {
+        // Wipe D1 — CASCADE handles docs and reflect_passes automatically.
+        await env.RESEARCH_DB.batch([
+          env.RESEARCH_DB.prepare("DELETE FROM runs"),
+          env.RESEARCH_DB.prepare(
+            "DELETE FROM sqlite_sequence WHERE name IN ('runs','docs','reflect_passes')",
+          ),
+        ]);
+        // Wipe KV thumbnails and latest_id pointer.
+        let cursor: string | undefined;
+        do {
+          const page = await env.RESEARCH_KV.list({ prefix: "thumb:", ...(cursor ? { cursor } : {}) });
+          await Promise.all(page.keys.map((k) => env.RESEARCH_KV.delete(k.name)));
+          cursor = page.list_complete ? undefined : (page as { cursor?: string }).cursor;
+        } while (cursor);
+        await env.RESEARCH_KV.delete("latest_id");
+        console.log("[cleanup] all runs and thumbnails deleted");
+        return Response.json({ ok: true });
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error("[cleanup]", message);
+        return Response.json({ error: message }, { status: 500 });
+      }
     }
 
     // ── /api/run (manual trigger — streams SSE progress events) ──────────  //
@@ -441,7 +492,9 @@ export default {
       const encoder = new TextEncoder();
 
       // Fire-and-forget: stream progress events then the final result.
-      // ctx.waitUntil keeps the Worker alive until the stream closes.
+      // ctx.waitUntil keeps the Worker alive even after the stream closes.
+      // Thumbnail generates AFTER research so it can use actual headline context;
+      // we close the stream first and generate in the background — client polls.
       ctx.waitUntil((async () => {
         const emit = (data: object): Promise<void> => {
           try { return writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); }
@@ -450,22 +503,26 @@ export default {
         const close = async () => { try { await writer.close(); } catch {} };
 
         const timeout = setTimeout(() => {
-          // Best-effort error notification. close() must run regardless of whether
-          // the write drains (backpressure stall) — cap the wait at 2 s.
           void Promise.race([
             emit({ type: "error", message: "Research timed out — try fewer passes or a shorter look-back." }),
             new Promise<void>((r) => setTimeout(r, 2_000)),
           ]).finally(close);
-        }, 28_000);
+        }, 45_000);
 
         let storedId: number | undefined;
+        let storedDocs: Array<{ title: string }> = [];
+
         try {
           const stored = await runAndStore(
             env, topic, question, days, maxIter, model, "manual",
             (event) => { void emit(event); },
           );
           storedId = stored.id;
+          storedDocs = stored.docs.filter((d) => d.title);
           clearTimeout(timeout);
+
+          // Emit thumbnail_start then result — client renders immediately and polls for thumbnails.
+          await emit({ type: "thumbnail_start" });
           await emit({ type: "result", ...stored });
         } catch (e) {
           clearTimeout(timeout);
@@ -473,10 +530,15 @@ export default {
         } finally {
           await close();
         }
-        // Generate thumbnail in background after stream closes (non-fatal)
-        if (storedId !== undefined) {
-          try { await generateAndStoreThumbnail(env, storedId, topic); }
-          catch (e) { console.error("[run] thumbnail failed (non-fatal):", e); }
+
+        // Stream is closed — generate per-article thumbnails in background (parallel).
+        // Workers AI binding is exempt from HTTP wall-clock limits; ~5s for all 5.
+        if (storedId !== undefined && storedDocs.length > 0) {
+          try {
+            await generateAndStoreThumbnails(env, storedId, storedDocs);
+          } catch (e) {
+            console.error("[run] post-stream thumbnails failed (non-fatal):", e);
+          }
         }
       })());
 
@@ -501,7 +563,7 @@ export default {
       console.log("[cron] daily research run complete");
 
       try {
-        await generateAndStoreThumbnail(env, result.id, CRON_TOPIC);
+        await generateAndStoreThumbnails(env, result.id, result.docs.filter((d) => d.title));
       } catch (e) {
         console.error("[cron] thumbnail generation failed (non-fatal):", e);
       }
