@@ -132,6 +132,14 @@ function extractJson<T = unknown>(text: string): T {
   throw new Error(`No JSON found in: ${text.slice(0, 160)}`);
 }
 
+// Anthropic returns HTTP 400/402 with "credit balance is too low" when credits
+// are exhausted. These errors must NOT be swallowed by node catch blocks —
+// we re-throw them so the fallback in runAndStore can switch to OpenAI.
+function isCreditsError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes("credit") || msg.includes("billing") || msg.includes("payment");
+}
+
 function normalizeTag(tag: unknown): Tag {
   const t = String(tag ?? "").trim().toLowerCase();
   const hit = VALID_TAGS.find((v) => v.toLowerCase() === t);
@@ -334,6 +342,7 @@ function buildGraph(
         messages.push(ack);
       }
     } catch (e) {
+      if (isCreditsError(e)) throw e;
       console.error("[researcher] tool loop failed:", e);
     }
 
@@ -406,6 +415,7 @@ function buildGraph(
     try {
       return { answer: await ask(writerLlm, system, user) };
     } catch (e) {
+      if (isCreditsError(e)) throw e;
       // fail safe: don't 500 the whole run if the writer call fails — show the
       // raw matches (which the UI lists under Sources) plus the error.
       const msg = e instanceof Error ? e.message : String(e);
@@ -429,6 +439,7 @@ function buildGraph(
       gaps = (v.gaps ?? []).filter((g): g is string => typeof g === "string" && g.trim().length > 0);
       reasoning = String(v.reasoning ?? "").trim();
     } catch (e) {
+      if (isCreditsError(e)) throw e;
       // fail safe: a malformed critique must NOT cause an infinite loop
       sufficient = true; gaps = []; reasoning = `(reflect parse failed, stopping: ${e})`;
     }

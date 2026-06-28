@@ -309,18 +309,39 @@ async function runAndStore(
     console.error("[runAndStore] getRecentGaps failed, continuing without:", e);
   }
 
-  const result = await runResearch({
-    question,
-    topic,
-    days: effectiveDays,
-    maxIterations,
-    provider: "anthropic" as Provider,
-    model,
-    apiKey: env.ANTHROPIC_API_KEY,
-    tavilyKey: env.TAVILY_API_KEY,
-    priorGaps,
-    onProgress,
-  });
+  let result;
+  try {
+    result = await runResearch({
+      question,
+      topic,
+      days: effectiveDays,
+      maxIterations,
+      provider: "anthropic" as Provider,
+      model,
+      apiKey: env.ANTHROPIC_API_KEY,
+      tavilyKey: env.TAVILY_API_KEY,
+      priorGaps,
+      onProgress,
+    });
+  } catch (e) {
+    if (isAnthropicCreditError(e) && env.OPENAI_API_KEY) {
+      console.warn("[runAndStore] Anthropic credit error — falling back to OpenAI gpt-4o-mini");
+      result = await runResearch({
+        question,
+        topic,
+        days: effectiveDays,
+        maxIterations,
+        provider: "openai" as Provider,
+        model: MODELS.openai[0].id,
+        apiKey: env.OPENAI_API_KEY,
+        tavilyKey: env.TAVILY_API_KEY,
+        priorGaps,
+        onProgress,
+      });
+    } else {
+      throw e;
+    }
+  }
 
   const runAt = new Date().toISOString();
   const runId = await insertRun(
@@ -341,6 +362,18 @@ function resolveAnthropicModel(model: unknown): string {
   const allowed = MODELS.anthropic.map((m) => m.id);
   const m = typeof model === "string" ? model : "";
   return allowed.includes(m) ? m : CRON_MODEL;
+}
+
+// Anthropic returns HTTP 402 (billing_error) when credits are exhausted.
+// LangChain surfaces this in the thrown Error's message.
+function isAnthropicCreditError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    msg.includes("credit") ||
+    msg.includes("billing") ||
+    msg.includes("payment") ||
+    msg.includes("402")
+  );
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
